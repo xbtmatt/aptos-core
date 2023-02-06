@@ -183,6 +183,11 @@ module std::features {
         is_enabled(PARTIAL_GOVERNANCE_VOTING)
     }
 
+    /// Whether metadata is tracked for newly allocated storage slots.
+    ///
+    /// Lifetime: permanent
+    const STORAGE_SLOT_METADATA: u64 = 18;
+
     // ============================================================================================
     // Feature Flag Implementation
 
