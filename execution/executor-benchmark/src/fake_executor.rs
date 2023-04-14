@@ -7,6 +7,7 @@ use crate::{
     metrics::TIMER,
 };
 use anyhow::Result;
+use aptos_executable_store::ExecutableStore;
 use aptos_executor::{
     block_executor::TransactionBlockExecutor, components::chunk_output::ChunkOutput,
 };
@@ -16,12 +17,15 @@ use aptos_types::{
     account_config::{deposit::DepositEvent, withdraw::WithdrawEvent},
     contract_event::ContractEvent,
     event::EventKey,
+    executable::ExecutableTestType,
+    state_store::state_key::StateKey,
     transaction::{ExecutionStatus, Transaction, TransactionOutput, TransactionStatus},
     write_set::{WriteOp, WriteSet, WriteSetMut},
 };
 use move_core_types::{language_storage::TypeTag, move_resource::MoveStructType};
 use once_cell::sync::{Lazy, OnceCell};
 use rayon::{prelude::*, ThreadPool, ThreadPoolBuilder};
+use std::sync::Arc;
 
 pub struct FakeExecutor {}
 
@@ -194,6 +198,7 @@ impl TransactionBlockExecutor<BenchmarkTransaction> for FakeExecutor {
     fn execute_transaction_block(
         transactions: Vec<BenchmarkTransaction>,
         state_view: CachedStateView,
+        _executable_cache: Arc<ExecutableStore<StateKey, ExecutableTestType>>,
     ) -> Result<ChunkOutput> {
         let transaction_outputs = FAKE_EXECUTOR_POOL.install(|| {
             transactions

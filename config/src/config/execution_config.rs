@@ -26,6 +26,7 @@ pub struct ExecutionConfig {
     pub paranoid_type_verification: bool,
     pub paranoid_hot_potato_verification: bool,
     pub processed_transactions_detailed_counters: bool,
+    pub executable_cache_size: u64, // Cache size in bytes.
 }
 
 impl std::fmt::Debug for ExecutionConfig {
@@ -55,6 +56,8 @@ impl Default for ExecutionConfig {
             paranoid_type_verification: true,
             paranoid_hot_potato_verification: true,
             processed_transactions_detailed_counters: false,
+            // 100 mb default for executable cache. TODO: what makes sense.
+            executable_cache_size: 104857600,
         }
     }
 }

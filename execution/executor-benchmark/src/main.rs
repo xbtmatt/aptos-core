@@ -138,11 +138,15 @@ struct Opt {
 
     #[clap(long)]
     use_fake_executor: bool,
+
+    #[clap(long)]
+    executable_cache_size: Option<usize>,
 }
 
 impl Opt {
     fn concurrency_level(&self) -> usize {
         match self.concurrency_level {
+            Some(level) => level,
             None => {
                 let level = num_cpus::get();
                 println!(
@@ -151,7 +155,17 @@ impl Opt {
                 );
                 level
             },
-            Some(level) => level,
+        }
+    }
+
+    fn executable_cache_size(&self) -> usize {
+        match self.executable_cache_size {
+            None => {
+                // No executable sharing across blocks w. default 0.
+                println!("\nVM concurrency level defaults to 0 bytes\n",);
+                0
+            },
+            Some(size) => size,
         }
     }
 }
@@ -280,6 +294,7 @@ fn main() {
         .build_global()
         .expect("Failed to build rayon global thread pool.");
     AptosVM::set_concurrency_level_once(opt.concurrency_level());
+    AptosVM::set_executable_cache_size_once(opt.executable_cache_size() as u64);
     FakeExecutor::set_concurrency_level_once(opt.concurrency_level());
 
     if opt.use_fake_executor {
