@@ -33,6 +33,10 @@ pub struct TokenDataIdType {
 }
 
 impl TokenDataIdType {
+    pub fn to_id(&self) -> String {
+        format!("0x{}", self.to_hash())
+    }
+
     pub fn to_hash(&self) -> String {
         hash_str(&self.to_string())
     }
@@ -47,6 +51,10 @@ impl TokenDataIdType {
 
     pub fn get_collection_data_id_hash(&self) -> String {
         CollectionDataIdType::new(self.creator.clone(), self.collection.clone()).to_hash()
+    }
+
+    pub fn get_collection_id(&self) -> String {
+        CollectionDataIdType::new(self.creator.clone(), self.collection.clone()).to_id()
     }
 }
 
@@ -75,6 +83,10 @@ impl CollectionDataIdType {
 
     pub fn to_hash(&self) -> String {
         hash_str(&self.to_string())
+    }
+
+    pub fn to_id(&self) -> String {
+        format!("0x{}", self.to_hash())
     }
 
     pub fn get_name_trunc(&self) -> String {
