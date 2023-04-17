@@ -267,7 +267,7 @@ diesel::table! {
         description -> Text,
         token_properties -> Jsonb,
         token_standard -> Varchar,
-        is_fungible_v2 -> Bool,
+        is_fungible_v2 -> Nullable<Bool>,
         last_transaction_version -> Int8,
         last_transaction_timestamp -> Timestamp,
         inserted_at -> Timestamp,

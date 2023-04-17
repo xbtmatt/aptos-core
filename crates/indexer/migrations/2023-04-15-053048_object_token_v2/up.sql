@@ -156,7 +156,7 @@ CREATE TABLE IF NOT EXISTS current_token_datas_v2 (
   description TEXT NOT NULL,
   token_properties JSONB NOT NULL,
   token_standard VARCHAR(10) NOT NULL,
-  is_fungible_v2 BOOLEAN NOT NULL,
+  is_fungible_v2 BOOLEAN,
   last_transaction_version BIGINT NOT NULL,
   last_transaction_timestamp TIMESTAMP NOT NULL,
   inserted_at TIMESTAMP NOT NULL DEFAULT NOW()
