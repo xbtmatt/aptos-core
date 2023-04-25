@@ -44,7 +44,7 @@ where
         let executor_2 = executor_1.clone();
 
         let (block_sender, block_receiver) =
-            mpsc::sync_channel::<Vec<BenchmarkTransaction>>(50 /* bound */);
+            mpsc::sync_channel::<Vec<BenchmarkTransaction>>(5 /* bound */);
         let (commit_sender, commit_receiver) =
             mpsc::sync_channel(if config.split_stages { 10000 } else { 3 } /* bound */);
 

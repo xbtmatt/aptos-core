@@ -14,7 +14,7 @@ use std::{
 };
 
 // Lru cache will consume about 2G RAM based on this default value.
-pub const DEFAULT_MAX_NUM_NODES_PER_LRU_CACHE_SHARD: usize = 1 << 13;
+pub const DEFAULT_MAX_NUM_NODES_PER_LRU_CACHE_SHARD: usize = 1 << 16;
 
 pub const BUFFERED_STATE_TARGET_ITEMS: usize = 100_000;
 
