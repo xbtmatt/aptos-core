@@ -45,6 +45,8 @@ module aptos_framework::fungible_asset {
     const ESYMBOL_TOO_LONG: u64 = 16;
     /// Decimals is over the maximum of 32
     const EDECIMALS_TOO_LARGE: u64 = 17;
+    /// URI for the icon of the fungible asset metadata is too long
+    const EURI_TOO_LONG: u64 = 18;
 
     //
     // Constants
@@ -53,6 +55,7 @@ module aptos_framework::fungible_asset {
     const MAX_NAME_LENGTH: u64 = 32;
     const MAX_SYMBOL_LENGTH: u64 = 10;
     const MAX_DECIMALS: u8 = 32;
+    const MAX_URI_LENGTH: u64 = 512;
 
     /// Maximum possible coin supply.
     const MAX_U128: u128 = 340282366920938463463374607431768211455;
@@ -76,6 +79,11 @@ module aptos_framework::fungible_asset {
         /// For example, if `decimals` equals `2`, a balance of `505` coins should
         /// be displayed to a user as `5.05` (`505 / 10 ** 2`).
         decimals: u8,
+        /// The Uniform Resource Identifier (uri) pointing to an image that can be used as the icon for this fungible
+        /// asset.
+        icon_uri: String,
+        /// The entity who issued this fungible asset.
+        issuer: String,
     }
 
     #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
@@ -142,6 +150,8 @@ module aptos_framework::fungible_asset {
         name: String,
         symbol: String,
         decimals: u8,
+        icon_uri: String,
+        issuer: String,
     ): Object<Metadata> {
         let metadata_object_signer = &object::generate_signer(constructor_ref);
         let supply = option::map(monitoring_supply_with_maximum, |maximum| {
@@ -150,24 +160,18 @@ module aptos_framework::fungible_asset {
                 maximum
             }
         });
-        assert!(
-            string::length(&name) <= MAX_NAME_LENGTH,
-            error::invalid_argument(ENAME_TOO_LONG)
-        );
-        assert!(
-            string::length(&symbol) <= MAX_SYMBOL_LENGTH,
-            error::invalid_argument(ESYMBOL_TOO_LONG)
-        );
-        assert!(
-            decimals <= MAX_DECIMALS,
-            error::invalid_argument(EDECIMALS_TOO_LARGE)
-        );
+        assert!(string::length(&name) <= MAX_NAME_LENGTH, error::invalid_argument(ENAME_TOO_LONG));
+        assert!(string::length(&symbol) <= MAX_SYMBOL_LENGTH, error::invalid_argument(ESYMBOL_TOO_LONG));
+        assert!(decimals <= MAX_DECIMALS, error::invalid_argument(EDECIMALS_TOO_LARGE));
+        assert!(string::length(&icon_uri) <= MAX_URI_LENGTH, error::out_of_range(EURI_TOO_LONG));
         move_to(metadata_object_signer,
             Metadata {
                 supply,
                 name,
                 symbol,
                 decimals,
+                icon_uri,
+                issuer,
             }
         );
         object::object_from_constructor_ref<Metadata>(constructor_ref)
@@ -588,7 +592,9 @@ module aptos_framework::fungible_asset {
             option::some(option::some(100)) /* max supply */,
             string::utf8(b"USDA"),
             string::utf8(b"$$$"),
-            0
+            0,
+            string::utf8(b"http://www.example.com"),
+            string::utf8(b"native"),
         );
         let mint_ref = generate_mint_ref(constructor_ref);
         let burn_ref = generate_burn_ref(constructor_ref);
