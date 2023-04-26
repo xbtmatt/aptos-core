@@ -34,6 +34,40 @@ aptos move document --help
 
 The documentation process is also integrated into the framework building process and will be automatically triggered like other derived artifacts, via `cached-packages` or explicit release building.
 
+## Running Move tests
+
+To test our Move code while developing the Aptos Framework, run `cargo test` inside this directory:
+
+```
+cargo test
+```
+
+To skip the Move prover tests, run:
+
+```
+cargo test -- --skip prover
+```
+
+To filter and run only the tests in specific packages (e.g., `aptos_stdlib`), run:
+
+```
+cargo test -- aptos_stdlib --skip prover
+```
+
+(See tests in `tests/move_unit_test.rs` to figure out what filter to use; e.g., to run the tests in `aptos_framework` you must confusingly filter by `move_framework`.)
+
+Sometimes, Rust likes to run out of stack memory for no reason. In that case, try setting the following in your environment (e.g., in `~/.profile`)
+
+```
+export RUST_MIN_STACK=4297152
+```
+
+Alternatively, compiling in release mode seems to also address the stack issue:
+
+```
+cargo test --release -- --skip prover
+```
+
 ## Layout
 The overall structure of the Aptos Framework is as follows:
 
