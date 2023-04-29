@@ -7,10 +7,10 @@ title: "Embrace the Aptos Standards"
 Standards define a common interoperable interface for all developers to build upon. They consist of rules to ensure compatibility across applications and wallets on the Aptos blockchain. See a [list of known coin resource addresses](https://github.com/hippospace/aptos-coin-list) in Aptos provided by 
 hippospace.
 
-## Object
+## Object Standards
 ### [Aptos Object](./object.md)
 
-The [Object model](https://github.com/aptos-labs/aptos-core/blob/main/aptos-move/framework/aptos-framework/sources/object.move) allows Move to represent a complex type as a set of resources stored within a single address and offers a rich capability model that allows for fine-grained resource control and ownership management.
+The [Object model](https://github.com/aptos-labs/aptos-core/blob/main/aptos-move/framework/aptos-framework/sources/object.move) allows Move to represent a complex type as a set of resources stored within a single address and offers a rich capability model that enables fine-grained resource control and ownership management.
 
 ## Digital Asset Standards
 ### [Aptos Coin](./aptos-coin.md)
@@ -26,9 +26,9 @@ The [Token module](https://github.com/aptos-labs/aptos-core/blob/main/aptos-move
 - Encapsulates rich, flexible assets and collectibles. These assets are discrete (non-decimal) and can be fungible, semi-fungible, or nonfungible.
 - The token standard is in its own `AptosToken` package at the Address `0x3` to allow for rapid iteration based on feedback from the community.
 
-## Wallet standards
-### [Aptos Wallet standards](./wallets.md)
+## Wallet Standards
+### [Aptos Wallet](./wallets.md)
 
-The wallet standards ensure that all wallets use the same functionality for key features.  This includes:
+The wallet standard ensures that all wallets use the same functionality for key features:
 - The same mnemonic so that wallets can be moved between providers.
 - [Wallet adapter](../integration/wallet-adapter-concept.md) so that all applications can interact seamlessly with a common interface.
