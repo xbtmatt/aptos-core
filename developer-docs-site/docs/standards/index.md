@@ -8,11 +8,9 @@ Standards define a common interoperable interface for all developers to build up
 hippospace.
 
 ## Object
-### [Aptos Object](./aptos-object.md)
+### [Aptos Object](./object.md)
 
 The [Object model](https://github.com/aptos-labs/aptos-core/blob/main/aptos-move/framework/aptos-framework/sources/object.move) allows Move to represent a complex type as a set of resources stored within a single address and offers a rich capability model that allows for fine-grained resource control and ownership management.
-
-See [Object >](./object.md)
 
 ## Digital Asset Standards
 ### [Aptos Coin](./aptos-coin.md)
@@ -21,16 +19,12 @@ The [Coin module](https://github.com/aptos-labs/aptos-core/blob/main/aptos-move/
   - Applications and users can create and use simple tokens, with high performance and low gas overhead.
   - The Coin standard is part of the Aptos core framework so it can be used for currencies, including the gas currency.
 
-See [Aptos Coin >](./aptos-coin.md)
-
 ### [Aptos Token](./aptos-token.md)
 
 The [Token module](https://github.com/aptos-labs/aptos-core/blob/main/aptos-move/framework/aptos-token/sources/token.move), on the other hand:
 
 - Encapsulates rich, flexible assets and collectibles. These assets are discrete (non-decimal) and can be fungible, semi-fungible, or nonfungible.
 - The token standard is in its own `AptosToken` package at the Address `0x3` to allow for rapid iteration based on feedback from the community.
-
-See [Aptos Token >](./aptos-token.md)
 
 ## Wallet standards
 ### [Aptos Wallet standards](./wallets.md)
