@@ -14,13 +14,18 @@ use crate::{
     },
     safely_assert_eq, safely_pop_arg, safely_pop_type_arg,
 };
+use anyhow::Result;
 use better_any::{Tid, TidAble};
 use curve25519_dalek::{
     constants::RISTRETTO_BASEPOINT_TABLE,
     ristretto::{CompressedRistretto, RistrettoPoint},
     traits::{Identity, VartimeMultiscalarMul},
 };
-use move_core_types::gas_algebra::{NumArgs, NumBytes};
+use move_binary_format::errors::PartialVMError;
+use move_core_types::{
+    gas_algebra::{NumArgs, NumBytes},
+    vm_status::StatusCode,
+};
 use move_vm_types::{
     loaded_data::runtime_types::Type,
     values::{Reference, StructRef, Value, VectorRef},
@@ -34,9 +39,6 @@ use std::{
     fmt::Display,
     ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign},
 };
-use anyhow::Result;
-use move_binary_format::errors::PartialVMError;
-use move_core_types::vm_status::StatusCode;
 //
 // Public Data Structures and Constants
 //

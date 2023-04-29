@@ -2,8 +2,10 @@
 
 #[cfg(feature = "testing")]
 use crate::{
-    natives::cryptography::algebra::{AlgebraContext, Structure, BLS12381_GT_GENERATOR,
-                                     NUM_OBJECTS_LIMIT, abort_invariant_violated},
+    natives::cryptography::algebra::{
+        abort_invariant_violated, AlgebraContext, Structure, BLS12381_GT_GENERATOR,
+        NUM_OBJECTS_LIMIT,
+    },
     store_element, structure_from_ty_arg,
 };
 #[cfg(feature = "testing")]

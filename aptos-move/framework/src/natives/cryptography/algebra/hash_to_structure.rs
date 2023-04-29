@@ -4,8 +4,8 @@ use crate::{
     abort_unless_feature_flag_enabled,
     natives::{
         cryptography::algebra::{
-            gas::HashToGasParameters, AlgebraContext, HashToStructureSuite, Structure,
-            MOVE_ABORT_CODE_NOT_IMPLEMENTED, NUM_OBJECTS_LIMIT,abort_invariant_violated
+            abort_invariant_violated, gas::HashToGasParameters, AlgebraContext,
+            HashToStructureSuite, Structure, MOVE_ABORT_CODE_NOT_IMPLEMENTED, NUM_OBJECTS_LIMIT,
         },
         helpers::{SafeNativeContext, SafeNativeError, SafeNativeResult},
     },

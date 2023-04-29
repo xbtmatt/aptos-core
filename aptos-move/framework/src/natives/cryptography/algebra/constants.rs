@@ -4,9 +4,9 @@ use crate::{
     abort_unless_arithmetics_enabled_for_structure, abort_unless_feature_flag_enabled,
     natives::{
         cryptography::algebra::{
-            feature_flag_from_structure, gas::GasParameters, AlgebraContext, Structure,
-            BLS12381_GT_GENERATOR, BLS12381_Q12_LENDIAN, BLS12381_R_LENDIAN,
-            MOVE_ABORT_CODE_NOT_IMPLEMENTED, NUM_OBJECTS_LIMIT,
+            abort_invariant_violated, feature_flag_from_structure, gas::GasParameters,
+            AlgebraContext, Structure, BLS12381_GT_GENERATOR, BLS12381_Q12_LENDIAN,
+            BLS12381_R_LENDIAN, MOVE_ABORT_CODE_NOT_IMPLEMENTED, NUM_OBJECTS_LIMIT,
         },
         helpers::{SafeNativeContext, SafeNativeError, SafeNativeResult},
     },
@@ -19,7 +19,6 @@ use num_traits::{One, Zero};
 use once_cell::sync::Lazy;
 use smallvec::{smallvec, SmallVec};
 use std::{collections::VecDeque, rc::Rc};
-use crate::natives::cryptography::algebra::abort_invariant_violated;
 
 macro_rules! ark_constant_op_internal {
     ($context:expr, $ark_typ:ty, $ark_func:ident, $gas:expr) => {{
@@ -115,7 +114,9 @@ pub fn one_internal(
                 let target_vec = &mut context.extensions_mut().get_mut::<AlgebraContext>().objs;
                 let ret = target_vec.len();
                 if ret > 999 {
-                    return SafeNativeResult::Err(SafeNativeError::InvariantViolation(abort_invariant_violated()));
+                    return SafeNativeResult::Err(SafeNativeError::InvariantViolation(
+                        abort_invariant_violated(),
+                    ));
                 }
                 target_vec.push(Rc::new(element));
                 ret

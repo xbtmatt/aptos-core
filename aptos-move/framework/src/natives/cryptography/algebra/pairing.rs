@@ -5,7 +5,8 @@ use crate::{
     natives::{
         cryptography::algebra::{
             abort_invariant_violated, gas::GasParameters, AlgebraContext, Structure,
-            MOVE_ABORT_CODE_INPUT_VECTOR_SIZES_NOT_MATCHING, MOVE_ABORT_CODE_NOT_IMPLEMENTED, NUM_OBJECTS_LIMIT,
+            MOVE_ABORT_CODE_INPUT_VECTOR_SIZES_NOT_MATCHING, MOVE_ABORT_CODE_NOT_IMPLEMENTED,
+            NUM_OBJECTS_LIMIT,
         },
         helpers::{SafeNativeContext, SafeNativeError, SafeNativeResult},
     },
