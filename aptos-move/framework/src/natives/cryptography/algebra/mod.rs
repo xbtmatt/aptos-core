@@ -149,6 +149,9 @@ impl TryFrom<TypeTag> for HashToStructureSuite {
     }
 }
 
+/// This helps ensure that less than 1MB memory will be used by every VM session.
+pub const NUM_OBJECTS_LIMIT: usize = 1000;
+
 #[derive(Tid, Default)]
 pub struct AlgebraContext {
     objs: Vec<Rc<dyn Any>>,
@@ -160,6 +163,9 @@ impl AlgebraContext {
     }
 }
 
+fn abort_invariant_violated() -> PartialVMError {
+    PartialVMError::new(StatusCode::UNKNOWN_INVARIANT_VIOLATION_ERROR)
+}
 /// Try getting a pointer to the `handle`-th elements in `context` and assign it to a local variable `ptr_out`.
 /// Then try casting it to a reference of `typ` and assign it in a local variable `ref_out`.
 /// Abort the VM execution with invariant violation if anything above fails.
@@ -184,8 +190,12 @@ macro_rules! store_element {
     ($context:expr, $obj:expr) => {{
         let target_vec = &mut $context.extensions_mut().get_mut::<AlgebraContext>().objs;
         let ret = target_vec.len();
-        target_vec.push(Rc::new($obj));
-        ret
+        if ret >= NUM_OBJECTS_LIMIT {
+            Err(abort_invariant_violated())
+        } else {
+            target_vec.push(Rc::new($obj));
+            Ok(ret)
+        }
     }};
 }
 
@@ -222,10 +232,6 @@ macro_rules! abort_unless_feature_flag_enabled {
             },
         }
     };
-}
-
-fn abort_invariant_violated() -> PartialVMError {
-    PartialVMError::new(StatusCode::UNKNOWN_INVARIANT_VIOLATION_ERROR)
 }
 
 static BLS12381_GT_GENERATOR: Lazy<ark_bls12_381::Fq12> = Lazy::new(|| {

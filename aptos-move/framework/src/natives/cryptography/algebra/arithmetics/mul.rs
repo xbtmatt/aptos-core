@@ -6,7 +6,7 @@ use crate::{
     natives::{
         cryptography::algebra::{
             abort_invariant_violated, feature_flag_from_structure, gas::GasParameters,
-            AlgebraContext, Structure, MOVE_ABORT_CODE_NOT_IMPLEMENTED,
+            AlgebraContext, Structure, MOVE_ABORT_CODE_NOT_IMPLEMENTED, NUM_OBJECTS_LIMIT,
         },
         helpers::{SafeNativeContext, SafeNativeError, SafeNativeResult},
     },

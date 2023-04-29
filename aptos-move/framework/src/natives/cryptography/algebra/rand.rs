@@ -2,7 +2,8 @@
 
 #[cfg(feature = "testing")]
 use crate::{
-    natives::cryptography::algebra::{AlgebraContext, Structure, BLS12381_GT_GENERATOR},
+    natives::cryptography::algebra::{AlgebraContext, Structure, BLS12381_GT_GENERATOR,
+                                     NUM_OBJECTS_LIMIT, abort_invariant_violated},
     store_element, structure_from_ty_arg,
 };
 #[cfg(feature = "testing")]
@@ -25,7 +26,7 @@ use std::{collections::VecDeque, rc::Rc};
 macro_rules! ark_rand_internal {
     ($context:expr, $typ:ty) => {{
         let element = <$typ>::rand(&mut test_rng());
-        let handle = store_element!($context, element);
+        let handle = store_element!($context, element)?;
         Ok(NativeResult::ok(InternalGas::zero(), smallvec![
             Value::u64(handle as u64)
         ]))
@@ -57,7 +58,7 @@ pub fn rand_insecure_internal(
             let k = ark_bls12_381::Fr::rand(&mut test_rng());
             let k_bigint: ark_ff::BigInteger256 = k.into();
             let element = BLS12381_GT_GENERATOR.pow(k_bigint);
-            let handle = store_element!(context, element);
+            let handle = store_element!(context, element)?;
             Ok(NativeResult::ok(InternalGas::zero(), smallvec![
                 Value::u64(handle as u64)
             ]))

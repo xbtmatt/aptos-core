@@ -34,7 +34,9 @@ use std::{
     fmt::Display,
     ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign},
 };
-
+use anyhow::Result;
+use move_binary_format::errors::PartialVMError;
+use move_core_types::vm_status::StatusCode;
 //
 // Public Data Structures and Constants
 //
@@ -61,6 +63,9 @@ pub struct NativeRistrettoPointContext {
 // Private Data Structures and Constants
 //
 
+/// This helps ensure that less than 1MB memory will be used by every VM session.
+/// (Worst case: 1000 BLS12381 Fq12 elements, each takes 576 bytes).
+pub const NUM_POINTS_LIMIT: usize = 1000;
 /// A structure representing mutable data of the NativeRistrettoPointContext. This is in a RefCell
 /// of the overall context so we can mutate while still accessing the overall context.
 #[derive(Default)]
@@ -129,11 +134,14 @@ impl PointStore {
     }
 
     /// Adds the point to the store and returns its RistrettoPointHandle ID
-    pub fn add_point(&mut self, point: RistrettoPoint) -> u64 {
+    pub fn add_point(&mut self, point: RistrettoPoint) -> Result<u64, PartialVMError> {
         let id = self.points.len();
-        self.points.push(point);
-
-        id as u64
+        if id >= NUM_POINTS_LIMIT {
+            Err(abort_invariant_violated())
+        } else {
+            self.points.push(point);
+            Ok(id as u64)
+        }
     }
 }
 
@@ -175,7 +183,7 @@ pub(crate) fn native_point_identity(
     context.charge(gas_params.point_identity * NumArgs::one())?;
     let point_context = context.extensions().get::<NativeRistrettoPointContext>();
     let mut point_data = point_context.point_data.borrow_mut();
-    let result_handle = point_data.add_point(RistrettoPoint::identity());
+    let result_handle = point_data.add_point(RistrettoPoint::identity())?;
 
     Ok(smallvec![Value::u64(result_handle)])
 }
@@ -221,7 +229,7 @@ pub(crate) fn native_point_decompress(
     // Take the # of points produced so far, which creates a unique and deterministic global ID
     // within the temporary scope of this current transaction. Then, store the RistrettoPoint in
     // a vector using this global ID as an index.
-    let id = point_data.add_point(point);
+    let id = point_data.add_point(point)?;
 
     Ok(smallvec![Value::u64(id), Value::bool(true)])
 }
@@ -268,7 +276,7 @@ pub(crate) fn native_point_mul(
     let result_handle = match in_place {
         false => {
             let point = point_data.get_point(&point_handle).mul(scalar);
-            point_data.add_point(point)
+            point_data.add_point(point)?
         },
         true => {
             point_data.get_point_mut(&point_handle).mul_assign(scalar);
@@ -324,7 +332,7 @@ pub(crate) fn native_point_neg(
     let result_handle = match in_place {
         false => {
             let point = point_data.get_point(&point_handle).neg();
-            point_data.add_point(point)
+            point_data.add_point(point)?
         },
         true => {
             let neg = point_data.get_point_mut(&point_handle).neg();
@@ -361,7 +369,7 @@ pub(crate) fn native_point_add(
             let b = point_data.get_point(&b_handle);
 
             let point = a.add(b);
-            point_data.add_point(point)
+            point_data.add_point(point)?
         },
         true => {
             // NOTE: When calling Move's add_assign, Move's linear types ensure that we will never
@@ -404,7 +412,7 @@ pub(crate) fn native_point_sub(
             let b = point_data.get_point(&b_handle);
 
             let point = a.sub(b);
-            point_data.add_point(point)
+            point_data.add_point(point)?
         },
         true => {
             // NOTE: When calling Move's sub_assign, Move's linear types ensure that we will never
@@ -439,7 +447,7 @@ pub(crate) fn native_basepoint_mul(
 
     let basepoint = RISTRETTO_BASEPOINT_TABLE;
     let result = basepoint.mul(&a);
-    let result_handle = point_data.add_point(result);
+    let result_handle = point_data.add_point(result)?;
 
     Ok(smallvec![Value::u64(result_handle)])
 }
@@ -466,7 +474,7 @@ pub(crate) fn native_basepoint_double_mul(
     // Compute result = a * A + b * BASEPOINT and return a RistrettoPointHandle
     let A_ref = point_data.get_point(&A_handle);
     let result = RistrettoPoint::vartime_double_scalar_mul_basepoint(&a, A_ref, &b);
-    let result_handle = point_data.add_point(result);
+    let result_handle = point_data.add_point(result)?;
 
     Ok(smallvec![Value::u64(result_handle)])
 }
@@ -491,7 +499,7 @@ pub(crate) fn native_new_point_from_sha512(
     let point_context = context.extensions().get::<NativeRistrettoPointContext>();
     let mut point_data = point_context.point_data.borrow_mut();
 
-    let result_handle = point_data.add_point(RistrettoPoint::hash_from_bytes::<Sha512>(&bytes));
+    let result_handle = point_data.add_point(RistrettoPoint::hash_from_bytes::<Sha512>(&bytes))?;
 
     Ok(smallvec![Value::u64(result_handle)])
 }
@@ -511,7 +519,7 @@ pub(crate) fn native_new_point_from_64_uniform_bytes(
     let mut point_data = point_context.point_data.borrow_mut();
 
     let slice = pop_64_byte_slice(&mut args)?;
-    let result_handle = point_data.add_point(RistrettoPoint::from_uniform_bytes(&slice));
+    let result_handle = point_data.add_point(RistrettoPoint::from_uniform_bytes(&slice))?;
 
     Ok(smallvec![Value::u64(result_handle)])
 }
@@ -589,7 +597,7 @@ pub(crate) fn native_multi_scalar_mul(
         .point_data
         .borrow_mut();
 
-    let result_handle = point_data_mut.add_point(result);
+    let result_handle = point_data_mut.add_point(result)?;
 
     Ok(smallvec![Value::u64(result_handle)])
 }
@@ -665,13 +673,17 @@ pub(crate) fn safe_native_multi_scalar_mul_no_floating_point(
         .point_data
         .borrow_mut();
 
-    let result_handle = point_data_mut.add_point(result);
+    let result_handle = point_data_mut.add_point(result)?;
 
     Ok(smallvec![Value::u64(result_handle)])
 }
 
 // =========================================================================================
 // Helpers
+
+fn abort_invariant_violated() -> PartialVMError {
+    PartialVMError::new(StatusCode::UNKNOWN_INVARIANT_VIOLATION_ERROR)
+}
 
 fn get_point_handle(move_point: &StructRef) -> SafeNativeResult<RistrettoPointHandle> {
     let field_ref = move_point

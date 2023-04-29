@@ -6,7 +6,7 @@ use crate::{
     natives::{
         cryptography::algebra::{
             abort_invariant_violated, feature_flag_from_structure, gas::GasParameters,
-            AlgebraContext, Structure, MOVE_ABORT_CODE_NOT_IMPLEMENTED,
+            AlgebraContext, Structure, MOVE_ABORT_CODE_NOT_IMPLEMENTED, NUM_OBJECTS_LIMIT,
         },
         helpers::{SafeNativeContext, SafeNativeError, SafeNativeResult},
     },
@@ -58,10 +58,21 @@ pub fn neg_internal(
         ),
         Some(Structure::BLS12381Gt) => {
             let handle = safely_pop_arg!(args, u64) as usize;
-            safe_borrow_element!(context, handle, ark_bls12_381::Fq12, element_ptr, element);
+
+            let element_ptr = context
+                .extensions()
+                .get::<AlgebraContext>()
+                .objs
+                .get(handle)
+                .ok_or_else(abort_invariant_violated)?
+                .clone();
+            let element = element_ptr
+                .downcast_ref::<ark_bls12_381::Fq12>()
+                .ok_or_else(abort_invariant_violated)?;
+
             context.charge(gas_params.ark_bls12_381_fq12_inv * NumArgs::one())?;
             let new_element = element.inverse().ok_or_else(abort_invariant_violated)?;
-            let new_handle = store_element!(context, new_element);
+            let new_handle = store_element!(context, new_element)?;
             Ok(smallvec![Value::u64(new_handle as u64)])
         },
         _ => Err(SafeNativeError::Abort {

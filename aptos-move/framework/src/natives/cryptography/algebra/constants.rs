@@ -6,7 +6,7 @@ use crate::{
         cryptography::algebra::{
             feature_flag_from_structure, gas::GasParameters, AlgebraContext, Structure,
             BLS12381_GT_GENERATOR, BLS12381_Q12_LENDIAN, BLS12381_R_LENDIAN,
-            MOVE_ABORT_CODE_NOT_IMPLEMENTED,
+            MOVE_ABORT_CODE_NOT_IMPLEMENTED, NUM_OBJECTS_LIMIT,
         },
         helpers::{SafeNativeContext, SafeNativeError, SafeNativeResult},
     },
@@ -19,12 +19,13 @@ use num_traits::{One, Zero};
 use once_cell::sync::Lazy;
 use smallvec::{smallvec, SmallVec};
 use std::{collections::VecDeque, rc::Rc};
+use crate::natives::cryptography::algebra::abort_invariant_violated;
 
 macro_rules! ark_constant_op_internal {
     ($context:expr, $ark_typ:ty, $ark_func:ident, $gas:expr) => {{
         $context.charge($gas)?;
         let new_element = <$ark_typ>::$ark_func();
-        let new_handle = store_element!($context, new_element);
+        let new_handle = store_element!($context, new_element)?;
         Ok(smallvec![Value::u64(new_handle as u64)])
     }};
 }
@@ -110,7 +111,15 @@ pub fn one_internal(
         Some(Structure::BLS12381Gt) => {
             context.charge(gas_params.ark_bls12_381_fq12_clone * NumArgs::one())?;
             let element = *Lazy::force(&BLS12381_GT_GENERATOR);
-            let handle = store_element!(context, element);
+            let handle = {
+                let target_vec = &mut context.extensions_mut().get_mut::<AlgebraContext>().objs;
+                let ret = target_vec.len();
+                if ret > 999 {
+                    return SafeNativeResult::Err(SafeNativeError::InvariantViolation(abort_invariant_violated()));
+                }
+                target_vec.push(Rc::new(element));
+                ret
+            };
             Ok(smallvec![Value::u64(handle as u64)])
         },
         _ => Err(SafeNativeError::Abort {
