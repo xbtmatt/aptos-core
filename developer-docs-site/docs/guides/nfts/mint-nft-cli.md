@@ -15,7 +15,7 @@ This tutorial assumes you have:
 * a general understanding of NFTs and NFT Collections
 * an understanding of [the Token V2 standard](https://aptos.dev/guides/nfts/token-v2)
 
-## 1. Create an NFT
+## 1. Create a simple smart contract to mint an NFT
 
 We're going to start by making the simplest form of the flow for creating a collection and minting a token and sending it to a user. The code for this part of the tutorial is in the first section of the `move-examples/mint_nft` folder in the aptos-core repository.
 
@@ -119,8 +119,8 @@ Some of these fields are self-explanatory, but here's a quick rundown of what yo
 * `COLLECTION_DESCRIPTION`: A brief description of the collection. This often appears in wallets and marketplaces where the collection is listed. The `const` value for a string needs to be in raw u8 bytes, so we convert it into a String with `string::utf8(COLLECTION_DESCRIPTION)`
 * `maximum_supply`: The maximum number of NFTs the collection can have.
 * `collection_name`: The name of the collection, also used as a unique identifier in combination with the creator. There are no two collections with the same name and creator.
-* `collection_uri`: A external, off-chain link pointing to large amounts of data for wallets and marketplaces to use. Most commonly used as the main collection image.
-* `MUTABLE_PROPERTY`: All of these fields that start with `MUTABLE_` are used to enable or disable the ability for the collection creator to change the corresponding values later. For example: `MUTABLE_COLLECTION_DESCRIPTION` means the 
+* `collection_uri`: An external, off-chain link pointing to large amounts of data for wallets and marketplaces to use. Most commonly used as the main collection image.
+* `MUTABLE_PROPERTY`: All of these fields that start with `MUTABLE_` are used to enable or disable the ability for the collection creator to change the corresponding values later. For example: `MUTABLE_COLLECTION_DESCRIPTION` means the collection description is mutable.
 * `TOKENS_BURNABLE_BY_CREATOR`: Whether or not the token can be burned by the creator.
 * `TOKENS_FREEZABLE_BY_CREATOR`: Whether or not the token can be temporarily or permanently frozen by the creator, meaning that the owner cannot change; that is, it cannot be transferred.
 * `royalty_numerator`: The numerator for the royalty percentage.
@@ -177,8 +177,8 @@ aptos_token::mint(
 
 The last 3 parameters are used to create a property map. Respectively, they are the property key, type, and value for the token property map. We pass in a field called `mint_timestamp` of type `u64` to display how to use it. The inner vector values are BCS serialized bytes that map to a key's corresponding `value` for the `key: value` structure of the map. 
 
-:::info
-Property maps are unique polymorphic data structures that enable storing multiple data types into a mapped vector. You can read more about them in the `aptos-token-objects/property_map.move` contract.
+:::tip Advanced Info
+Property maps are unique polymorphic data structures that enable storing multiple data types into a mapped vector. You can read more about them in the [aptos-token-objects/property_map.move](https://github.com/aptos-labs/aptos-core/blob/main/aptos-move/framework/aptos-token-objects/sources/property_map.move) contract.
 :::
 
 <br/>
