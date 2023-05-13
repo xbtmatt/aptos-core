@@ -1,5 +1,5 @@
 [package]
-name = "Examples"
+name = "Mint NFT V2 Part 2"
 version = "0.0.0"
 
 [dependencies]
