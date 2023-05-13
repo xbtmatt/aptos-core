@@ -308,6 +308,7 @@ const sidebars = {
       items: [
         "guides/nfts/aptos-token-comparison",
         "guides/nfts/mint-nft-cli",
+        "guides/nfts/mint-nft-v2-cli",
         "guides/nfts/mint-onchain-data",
         "guides/nfts/nft-minting-tool",
       ],

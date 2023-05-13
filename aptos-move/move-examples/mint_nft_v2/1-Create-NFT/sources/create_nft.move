@@ -1,4 +1,4 @@
-module mint_nft::create_nft {
+module mint_nft_v2_part1::create_nft {
     use std::bcs;
     use std::error;
     use std::signer;
@@ -42,7 +42,7 @@ module mint_nft::create_nft {
     ) {
         // ensure the signer of this function call is also the owner of the contract
         let creator_addr = signer::address_of(creator);
-        assert!(creator_addr == @mint_nft, error::permission_denied(ENOT_AUTHORIZED));
+        assert!(creator_addr == @mint_nft_v2_part1, error::permission_denied(ENOT_AUTHORIZED));
 
         aptos_token::create_collection(
             creator,
@@ -78,7 +78,7 @@ module mint_nft::create_nft {
         // store next GUID to derive object address later
         let token_creation_num = account::get_guid_next_creation_num(creator_addr);
 
-        // access the configuration resources stored on-chain at @mint_nft's address
+        // access the configuration resources stored on-chain at creator_addr
         let mint_configuration = borrow_global<MintConfiguration>(creator_addr);
 
         // mint token to the receiver
@@ -86,7 +86,7 @@ module mint_nft::create_nft {
             creator,
             mint_configuration.collection_name,
             string::utf8(TOKEN_DESCRIPTION),
-            string::utf8(b"mint_timfefstaffff33p543"),
+            string::utf8(b"mint_timestamp"),
             mint_configuration.token_uri,
             vector<String> [ string::utf8(b"mint_timestamp") ],
             vector<String> [ string::utf8(b"u64") ],
