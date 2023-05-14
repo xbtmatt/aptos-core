@@ -99,7 +99,7 @@
 ///     `curl --request GET --url https://fullnode.devnet.aptoslabs.com/v1/accounts/[last_minted_token_object_address]/resources`
 ///
 /// This is the end of this NFT tutorial! Congrats on making it to the end. Please let us know if you have any questions / feedback by opening a github issue / feature request : )
-module mint_nft_v2::create_nft_getting_production_ready {
+module mint_nft_v2::create_nft_with_whitelist {
     use std::error;
     use std::signer;
     use std::bcs;

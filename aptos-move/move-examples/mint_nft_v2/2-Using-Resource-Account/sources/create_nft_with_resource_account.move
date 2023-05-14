@@ -75,17 +75,17 @@ module mint_nft_v2_part2::create_nft_with_resource_account {
     }
 
     /// Mint an NFT to a receiver who requests it.
-    public entry fun mint(receiver: &signer, creator_addr: address) acquires MintConfiguration {
-        // access the configuration resources stored on-chain at creator_addr's address
-        let mint_configuration = borrow_global<MintConfiguration>(creator_addr);
+    public entry fun mint(receiver: &signer, resource_addr: address) acquires MintConfiguration {
+        // access the configuration resources stored on-chain at resource_addr's address
+        let mint_configuration = borrow_global<MintConfiguration>(resource_addr);
         let signer_cap = &mint_configuration.signer_capability;
-        let creator: &signer = &account::create_signer_with_capability(signer_cap);
+        let resource_signer: &signer = &account::create_signer_with_capability(signer_cap);
         // store next GUID to derive object address later
-        let token_creation_num = account::get_guid_next_creation_num(creator_addr);
+        let token_creation_num = account::get_guid_next_creation_num(resource_addr);
 
         // mint token to the receiver
         aptos_token::mint(
-            creator,
+            resource_signer,
             mint_configuration.collection_name,
             string::utf8(TOKEN_DESCRIPTION),
             string::utf8(b"mint_timestamp"),
@@ -95,8 +95,14 @@ module mint_nft_v2_part2::create_nft_with_resource_account {
             vector<vector<u8>> [ bcs::to_bytes(&timestamp::now_seconds()) ],
         );
 
-        // TODO: Parallelize later; right now this is non-parallelizable due to using the creator's GUID.
-        let token_object = object::address_to_object<AptosToken>(object::create_guid_object_address(creator_addr, token_creation_num));
-        object::transfer(creator, token_object, signer::address_of(receiver));
+        // TODO: Parallelize later; right now this is non-parallelizable due to using the resource_signer's GUID.
+        let token_object = object::address_to_object<AptosToken>(object::create_guid_object_address(resource_addr, token_creation_num));
+        object::transfer(resource_signer, token_object, signer::address_of(receiver));
     }
+
+    #[view]
+    public fun get_resource_address(collection_name: String): address {
+        account::create_resource_address(&@mint_nft_v2_part2, *string::bytes(&collection_name))
+    }
+
 }
