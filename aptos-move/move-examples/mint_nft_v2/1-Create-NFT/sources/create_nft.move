@@ -86,7 +86,7 @@ module mint_nft_v2_part1::create_nft {
             creator,
             mint_configuration.collection_name,
             string::utf8(TOKEN_DESCRIPTION),
-            string::utf8(b"mint_timestamp"),
+            mint_configuration.token_name,
             mint_configuration.token_uri,
             vector<String> [ string::utf8(b"mint_timestamp") ],
             vector<String> [ string::utf8(b"u64") ],
