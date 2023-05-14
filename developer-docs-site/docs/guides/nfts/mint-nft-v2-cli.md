@@ -4,7 +4,13 @@ title: "Mint NFTs (v2) with the Aptos CLI"
 
 # Mint NFTs (v2) with the Aptos CLI
 
-This tutorial is intended to demonstrate how to programmatically mint NFTs on Aptos. It builds upon the simplest version of an NFT Collection creator manually minting an NFT to a receiver's account to eventually creating a more complex smart contract that facilitates users requesting an NFT and receiving it without ever having to get explicit signer approval from the Collection creator.
+This tutorial is intended to demonstrate how to programmatically mint NFTs on Aptos. The simplest version of a minting contract is the NFT collection creator manually minting and sending an NFT to a user.
+
+We build upon this several times until we eventually create an automated NFT minting smart contract that has:
+- A whitelist
+- An end time
+- An admin
+- The ability for the admin to enable & disable the mint
 
 ## Prerequisites
 
@@ -328,8 +334,17 @@ public entry fun mint(receiver: &signer, resource_addr: address) acquires MintCo
 }
 ```
 
+Note that we require the user to pass in the resource address- we've provided a view function as one way for you to calculate it. We show you how to use this function later in the [Running the contract section](#running-the-contract-1).
+
+```rust
+#[view]
+public fun get_resource_address(collection_name: String): address {
+    account::create_resource_address(&@mint_nft_v2_part2, *string::bytes(&collection_name))
+}
+```
+
 :::tip Advanced Tip
-We could generate `resource_addr` inside the `mint` function instead of making the user supply it by calling `create_resource_address(source_address, seed)` in account.move, but the function has heavy computational overhead because it uses a cryptographic hashing function. In some instances where we only call this function a few times, this might be okay, but since a `mint` function is intended to be called by potentially thousands of users in a very short period of time, we make the user supply the resource address instead.
+Computing the `resource_addr` inside the `mint` function with `account::create_resource_address(...)` has heavy computational overhead because it uses a cryptographic hashing function. In some instances where we only call the `mint` function a few times, this might be okay, but since a `mint` function is intended to be called by potentially thousands of users in a very short period of time, we ensure that it has been precomputed and have the user pass it in as an argument.
 :::
 
 Next, we access the mint configuration data to retrieve the signer capability. We generate a temporary signer with `account::create_signer_with_capability` and use it to sign the mint function and transfer the token object to the receiver.
@@ -378,21 +393,27 @@ aptos move run --function-id default::create_nft_with_resource_account::initiali
                   string:"https://www.link-to-your-token-image.com"       
 ```
 
+Next we need to get the resource address for the contract with our view function.
+
+```shell
+aptos move view --function-id default::create_nft_with_resource_account::get_resource_address \
+                --profile default \
+                --args string:"YOUR_COLLECTION_NAME_HERE"
+```
+
 Now we call this function as a user, which we simulate with our `nft-receiver` profile:
 
 ```shell
-aptos move run --function-id default::create_nft_with_resource_account::mint --profile nft-receiver
+aptos move run --function-id default::create_nft_with_resource_account::mint \
+               --profile nft-receiver \
+               --args address:YOUR_RESOURCE_ADDRESS_HERE
 ```
 
 Great! Now you've created the collection as an owner and requested to mint as a user and received the newly minted NFT.
 
-It may not feel different, since you're acting as the owner and the receiver all from the command line, but the user flow for this makes much more sense than before.
+It may not feel different, since you're acting as the owner and the receiver all from the command line, but in an actual dapp this user flow makes much more sense than before.
 
-Imagine the difference in the first part vs the second part as a user:
-
-1. You have to wait for the owner of the contract to send you an NFT.
-2. You can request to mint the NFT yourself.
-
-The second option is a significantly better user experience, and it was only possible because we utilized a resource account.
+In the first section, the user has to wait for the owner of the contract to mint and send them an NFT. In the second section, the user can request to mint and receive an NFT themselves.
 
 ## 3. Adding a start time, an end time, and an admin
+
