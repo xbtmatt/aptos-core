@@ -498,7 +498,7 @@ public entry fun set_admin(
     resource_addr: address,
 ) acquires MintConfiguration {
     let mint_configuration = borrow_global_mut<MintConfiguration>(resource_addr);
-    let current_admin_addr = signer::address_of(current_admin);    
+    let current_admin_addr = signer::address_of(current_admin);
     // ensure the signer attempting to change the admin is the current admin
     assert!(current_admin_addr == mint_configuration.admin, error::permission_denied(ENOT_AUTHORIZED));
     // ensure the new admin address is an account that's been initialized so we don't accidentally lock ourselves out
@@ -586,4 +586,87 @@ aptos move run --function-id default::create_nft_with_resource_and_admin_account
 ```
 
 Try to mint again, and it should succeed! You can try setting the admin with the `set_admin(...)` call and then set the `expiration_timestamp` and `minting_enabled` fields on your own. Use the correct and incorrect admin to see how it works.
+
+## 4. Adding a customizable whitelist, custom events, and unit tests
+
+We've set restrictions for *when* a user can mint, but we have no rules regarding how many times or which users can mint. This is the purpose of a whitelist- only allowing certain accounts to mint, often with a restriction on how many times. We also want to add custom events so that when a user mints, an event is emitted on-chain that describes details about the mint transaction.
+
+1. Add a whitelist that restricts minting to whitelisted addresses
+2. Add the ability to add/remove addresses from the whitelist
+3. Emit a custom event when a user mints
+4. Explore and discuss the implications of using different data structures
+### Adding a whitelist
+
+The functionality of a whitelist is very simple: we abort if the address doesn't exist in the list. 
+
+Let's explore the different data structures we could use for this:
+
+1. You might be tempted to use a `vector<address>` for this, but the lookup time of a vector gets prohibitively expensive when the size of the list starts growing into the thousands.
+2. A Table offers very efficient lookup times, so we could use `Table<address, bool>` for our whitelist. The `bool` would be a useless field, though, because we'd just be using the `table::contains(...)` function to check that an address exists as a key in the table.
+3. An Object offers us a similar efficient lookup time as a Table, but also allows us to emit minting events from the Object, rather than a single resource. This frees up a bottleneck that would disallow parallelization on the function call. 
+
+Let's use an Object called `MintTicket` to allow the user to "get in" to the mint function. First let's define the data that will go into the object:
+
+```rust
+#[resource_group_member(group = aptos_framework::object::ObjectGroup)]
+struct MintTicket has key {
+    mint_events: event::EventHandle<MintEvent>,
+    extend_ref: ExtendRef,
+}
+
+struct MintEvent has drop, store {
+    collection: String,
+    creator: address,
+    name: String,
+    receiver: address,
+}
+```
+
+Let's write our add/remove from whitelist functionality:
+
+```rust
+public entry fun add_to_whitelist(admin: &signer, addresses: vector<address>, resource_addr: address) {
+    assert!(is_admin(admin, resource_addr), error::permission_denied(ENOT_AUTHORIZED));
+    let resource_signer = &account::create_signer_with_capability(&borrow_global<MintConfiguration>.signer_capability);
+
+    vector::for_each(addresses, |user_addr|) {
+        // create a seed from the BCS serialized user address
+        let seed = bcs::to_bytes(&user_addr);
+        // generate the object address to check if it already exists
+        let object_addr = object::create_object_address(&resource_addr, seed);
+        if (!object::exists_at<MintTicket>(object_addr)) {
+            // create the object with our seed (user_address + b"MintTicket")
+            let constructor_ref = object::create_named_object(resource_signer, seed);
+            let object_signer = object::generate_signer(&constructor_ref);
+            move_to(
+                &object_signer,
+                MintTicket {
+                    mint_events: object::new_event_handle(&object_signer),
+                    extend_ref: object::generate_extend_ref(&constructor_ref),
+                }
+            );
+        };
+    };
+}
+```
+
+
+
+# can you run the inline function of an Object/Module hybrid?
+
+# don't let admin change whitelist while mint is enabled!
+
+
+
+// calculate resource address off chain
+// send it in with minter as signer
+// verify address_of(minter: &signer) is the owner of the Object
+
+:::tip Choosing the right data structure 
+This means we're going to want a data structure that has an efficient lookup time when there's a large set of entries
+:::
+
+### Adding and removing addresses from the whitelist
+
+### Emitting custom events
 
