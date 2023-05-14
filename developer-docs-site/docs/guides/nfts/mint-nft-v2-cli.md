@@ -18,8 +18,7 @@ This tutorial assumes you have:
 
 * the [Aptos CLI](../../tools/install-cli/index.md) (or you can run from [aptos-core](https://github.com/aptos-labs/aptos-core) source via `cargo run`)
 * the `aptos-core` repository checked out: `git clone https://github.com/aptos-labs/aptos-core.git`
-* a general understanding of NFTs and NFT Collections
-* an understanding of [the Token V2 standard](https://aptos.dev/guides/nfts/token-v2)
+* a basic understanding of Move, NFTs and NFT Collections
 
 ## 1. Creating a simple smart contract to mint an NFT
 
@@ -135,7 +134,7 @@ aptos_token::mint(
 );
 ```
 
-The last 3 parameters are used to create a property map. Respectively, they are the property key, type, and value for the token property map. We pass in a field called `mint_timestamp` of type `u64` to display how to use it. The inner vector values are BCS serialized bytes that map to a key's corresponding `value` for the `key: value` structure of the map. 
+The last 3 parameters are used to create a property map. Respectively, they are the property key, type, and value for the token property map. We pass in a field called `mint_timestamp` of type `u64` to display how to use it. The inner vector values are BCS serialized bytes that map to a key's corresponding `value` for the `key: value` structure of the map.
 
 :::tip Advanced Info
 Property maps are unique polymorphic data structures that enable storing multiple data types into a mapped vector. You can read more about them in the [aptos-token-objects/property_map.move](https://github.com/aptos-labs/aptos-core/blob/main/aptos-move/framework/aptos-token-objects/sources/property_map.move) contract.
@@ -216,12 +215,12 @@ Now let's call the `initialize_collection` function. Since we deployed the contr
 aptos move run --function-id default::create_nft::initialize_collection   \
                --profile default                                          \
                --args                                                     \
-                  string:"Choose your collection name here!"              \
+                  string:"Krazy Kangaroos"                                \
                   string:"https://www.link-to-your-collection-image.com"  \
                   u64:3                                                   \
                   u64:5                                                   \
                   u64:100                                                 \
-                  string:"Your Token #1"                                  \
+                  string:"Krazy Kangaroo #1"                              \
                   string:"https://www.link-to-your-token-image.com"       
 ```
 
@@ -243,11 +242,9 @@ aptos move run --function-id default::create_nft::mint   \
 
 Congratulations! You've created a collection, minted an NFT, and transferred the NFT to another account.
 
-To view the events in this transaction, go to:
+To view the events in this transaction, paste your transaction hash in the Aptos explorer search bar and navigate to the events section, or directly go to:
 
 https://explorer.aptoslabs.com/txn/YOUR_TRANSACTION_HASH_HERE/events?network=devnet
-
-But replace `YOUR_TRANSACTION_HASH_HERE` with the output of the transaction hash from the `aptos move run ...` command, or paste it into the explorer's search bar.
 
 You should see a `0x4::collection::MintEvent` and a `0x1::object::TransferEvent`.
 
@@ -368,15 +365,13 @@ In our case, our code essentially makes the mint free, because there is no cost 
 intentional in some cases, but should be considered before hand. Always be highly aware of how you grant access to a resource account's signer capability.
 :::
 
-### Publishing the module
+### Publishing the module and running the contract
 
-Publishing the module is basically the same as before. Just make sure you're in the `2-Using-Resource-Account` directory and run this command, note the only thing that changed is the module name in the first line, `create_nft_with_resource_account` instead of `create_nft:
+Publishing the module is basically the same as before. Just make sure you're in the `2-Using-Resource-Account` directory and run this command, note the only thing that changed is the module name in the first line, `create_nft_with_resource_account` instead of `create_nft`:
 
 ```shell
 aptos move publish --named-addresses mint_nft_v2_part2=default --profile default --assume-yes
 ```
-
-### Running the contract
 
 Call this function as the owner of the contract, which is our `default` profile. Keep in mind the `--profile default` flag:
 
@@ -384,12 +379,12 @@ Call this function as the owner of the contract, which is our `default` profile.
 aptos move run --function-id default::create_nft_with_resource_account::initialize_collection   \
                --profile default                                          \
                --args                                                     \
-                  string:"Choose your collection name here!"              \
+                  string:"Krazy Kangaroos"                                \
                   string:"https://www.link-to-your-collection-image.com"  \
                   u64:3                                                   \
                   u64:5                                                   \
                   u64:100                                                 \
-                  string:"Your Token #1"                                  \
+                  string:"Krazy Kangaroo #1"                              \
                   string:"https://www.link-to-your-token-image.com"       
 ```
 
@@ -398,7 +393,7 @@ Next we need to get the resource address for the contract with our view function
 ```shell
 aptos move view --function-id default::create_nft_with_resource_account::get_resource_address \
                 --profile default \
-                --args string:"YOUR_COLLECTION_NAME_HERE"
+                --args string:"Krazy Kangaroos"
 ```
 
 Now we call this function as a user, which we simulate with our `nft-receiver` profile:
@@ -411,9 +406,184 @@ aptos move run --function-id default::create_nft_with_resource_account::mint \
 
 Great! Now you've created the collection as an owner and requested to mint as a user and received the newly minted NFT.
 
-It may not feel different, since you're acting as the owner and the receiver all from the command line, but in an actual dapp this user flow makes much more sense than before.
+It may not feel different since you're acting as the owner and the receiver all from the command line, but in an actual dapp this user flow makes much more sense than before.
 
 In the first section, the user has to wait for the owner of the contract to mint and send them an NFT. In the second section, the user can request to mint and receive an NFT themselves.
 
-## 3. Adding a start time, an end time, and an admin
+## 3. Adding an end time, an admin, and an enabled flag
+
+We're still missing some very common features for NFT minting contracts:
+
+1. A start and end time
+2. The ability to enable or disable the mint
+3. An admin that can alter #1 and #2
+
+To keep things simple, we're not going to set a start time, but we'll add the other functionality to the contract.
+
+### Adding the new configuration options
+
+We need to add the expiration timestamp, the enabled flag, and the admin address to the mint configuration resource:
+
+```rust
+struct MintConfiguration has key {
+    // ...
+    expiration_timestamp: u64,
+    minting_enabled: bool,
+    admin: address,
+}
+```
+
+When we initialize the collection, we default to an expired timestamp that's one second in the past and disable the mint:
+
+```rust
+public entry fun initialize_collection( /* ... */ ) {
+    // ...
+
+    move_to(&resource_signer, MintConfiguration {
+        // ...
+
+        expiration_timestamp: timestamp::now_seconds() - 1,
+        minting_enabled: false,
+        admin: owner_addr,
+    });
+}
+```
+
+### Using assertions to enforce rules
+
+We can utilize these fields to enforce restrictions on the mint function by aborting the call with an error message if either of the two conditions aren't met:
+
+```rust
+public entry fun mint(receiver: &signer, resource_addr: address) acquires MintConfiguration {
+    // ...
+
+    // throw an error if this function is called after the expiration_timestamp
+    assert!(timestamp::now_seconds() < mint_configuration.expiration_timestamp, error::permission_denied(ECOLLECTION_EXPIRED));
+    // throw an error if minting is disabled
+    assert!(mint_configuration.minting_enabled, error::permission_denied(EMINTING_DISABLED));
+
+    // ...
+}
+```
+
+:::note
+Function calls with failed assertions don't have side effects. When an error is thrown after a function alters a field with `borrow_global_mut`, none of the changes in the entire transaction occur. This includes any resource affected by nested and parent function calls.
+:::
+
+We also need a way to set all of these values, but we don't want to give just anyone the ability to freely set these fields. We can ensure that in our setter functions, the account requesting the change
+is also the designated admin:
+
+```rust
+public entry fun set_minting_enabled(
+    admin: &signer,
+    minting_enabled: bool,
+    resource_addr: address,
+) acquires MintConfiguration {
+    let mint_configuration = borrow_global_mut<MintConfiguration>(resource_addr);
+    let admin_addr = signer::address_of(admin);
+    // abort if the signer is not the admin
+    assert!(admin_addr == mint_configuration.admin, error::permission_denied(ENOT_AUTHORIZED));
+    mint_configuration.minting_enabled = minting_enabled;
+}
+```
+
+The `set_expiration_timestamp` function is almost identical to `set_minting_enabled`, so we've left it out.
+
+If we want to change the admin, we'll do something similar:
+
+```rust
+public entry fun set_admin(
+    current_admin: &signer,
+    new_admin_addr: address,
+    resource_addr: address,
+) acquires MintConfiguration {
+    let mint_configuration = borrow_global_mut<MintConfiguration>(resource_addr);
+    let current_admin_addr = signer::address_of(current_admin);    
+    // ensure the signer attempting to change the admin is the current admin
+    assert!(current_admin_addr == mint_configuration.admin, error::permission_denied(ENOT_AUTHORIZED));
+    // ensure the new admin address is an account that's been initialized so we don't accidentally lock ourselves out
+    assert!(account::exists_at(new_admin_addr), error::not_found(ENOT_FOUND));
+    mint_configuration.admin = new_admin_addr;
+}
+```
+Note the extra error check to make sure the new admin account exists. If we don't check this, we could accidentally lock ourselves out by setting the admin to an account that doesn't exist yet.
+
+### Publishing the module and running the contract
+
+Navigate to the `3-Adding-Admin` directory and publish the module for part 3:
+
+```shell
+aptos move publish --named-addresses mint_nft_v2_part3=default --profile default --assume-yes
+```
+
+Initialize the collection:
+
+```shell
+aptos move run --function-id default::create_nft_with_resource_and_admin_accounts::initialize_collection   \
+               --profile default                                          \
+               --args                                                     \
+                  string:"Krazy Kangaroos"                                \
+                  string:"https://www.link-to-your-collection-image.com"  \
+                  u64:3                                                   \
+                  u64:5                                                   \
+                  u64:100                                                 \
+                  string:"Krazy Kangaroo #1"                              \
+                  string:"https://www.link-to-your-token-image.com"       
+```
+
+Get the new resource address:
+
+```shell
+aptos move view --function-id default::create_nft_with_resource_and_admin_accounts::get_resource_address \
+                --profile default \
+                --args string:"Krazy Kangaroos"
+```
+
+Mint as `nft-receiver`:
+
+```shell
+aptos move run --function-id default::create_nft_with_resource_and_admin_accounts::mint \
+               --profile nft-receiver \
+               --args address:YOUR_RESOURCE_ADDRESS_HERE
+```
+
+We haven't set our expiration timestamp to be in the future yet, so you should get an error here:
+
+```shell
+"ECOLLECTION_EXPIRED(0x50002): The collection minting is expired"
+```
+
+Okay, let's try to set the timestamp. Here's an easy way to get a current timestamp in seconds:
+
+```shell
+aptos move view --function-id 0x1::timestamp::now_seconds
+```
+
+Add enough time to this so you can mint before the timestamp expires.
+
+```shell
+aptos move run --function-id default::create_nft_with_resource_and_admin_accounts::set_expiration_timestamp \
+               --profile default                           \
+               --args                                      \
+                   u64:YOUR_TIMESTAMP_IN_SECONDS_HERE      \
+                   address:YOUR_RESOURCE_ADDRESS_HERE   
+```
+
+If you try to mint again, you should get a different error this time:
+
+```shell
+"EMINTING_DISABLED(0x50003): The collection minting is disabled"
+```
+
+Enable the mint:
+
+```shell
+aptos move run --function-id default::create_nft_with_resource_and_admin_accounts::set_minting_enabled \
+               --profile default                           \
+               --args                                      \
+                   bool:true                               \
+                   address:YOUR_RESOURCE_ADDRESS_HERE   
+```
+
+Try to mint again, and it should succeed! You can try setting the admin with the `set_admin(...)` call and then set the `expiration_timestamp` and `minting_enabled` fields on your own. Use the correct and incorrect admin to see how it works.
 

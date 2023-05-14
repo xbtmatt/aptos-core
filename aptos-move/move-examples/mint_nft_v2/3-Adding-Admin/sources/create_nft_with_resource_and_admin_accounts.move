@@ -17,6 +17,7 @@ module mint_nft_v2_part3::create_nft_with_resource_and_admin_accounts {
         token_uri: String,
         expiration_timestamp: u64,
         minting_enabled: bool,
+        admin: address,
     }
     /// Action not authorized because the signer is not the admin of this module
     const ENOT_AUTHORIZED: u64 = 1;
@@ -24,6 +25,8 @@ module mint_nft_v2_part3::create_nft_with_resource_and_admin_accounts {
     const ECOLLECTION_EXPIRED: u64 = 2;
     /// The collection minting is disabled
     const EMINTING_DISABLED: u64 = 3;
+    /// The requested admin account does not exist
+    const ENOT_FOUND: u64 = 4;
 
     const COLLECTION_DESCRIPTION: vector<u8> = b"Your collection description here!";
     const TOKEN_DESCRIPTION: vector<u8> = b"Your token description here!";
@@ -46,7 +49,6 @@ module mint_nft_v2_part3::create_nft_with_resource_and_admin_accounts {
         royalty_denominator: u64,
         token_name: String,
         token_uri: String,
-        expiration_timestamp: u64,
     ) {
         // ensure the signer of this function call is also the owner of the contract
         let owner_addr = signer::address_of(owner);
@@ -78,8 +80,9 @@ module mint_nft_v2_part3::create_nft_with_resource_and_admin_accounts {
             collection_name,
             token_name,
             token_uri,
-            expiration_timestamp,
+            expiration_timestamp: timestamp::now_seconds() - 1,
             minting_enabled: false,
+            admin: owner_addr,
         });
     }
 
@@ -90,7 +93,7 @@ module mint_nft_v2_part3::create_nft_with_resource_and_admin_accounts {
 
         // throw an error if this function is called after the expiration_timestamp
         assert!(timestamp::now_seconds() < mint_configuration.expiration_timestamp, error::permission_denied(ECOLLECTION_EXPIRED));
-        // throw an ereror if minting is disabled
+        // throw an error if minting is disabled
         assert!(mint_configuration.minting_enabled, error::permission_denied(EMINTING_DISABLED));
 
         let signer_cap = &mint_configuration.signer_capability;
@@ -103,7 +106,7 @@ module mint_nft_v2_part3::create_nft_with_resource_and_admin_accounts {
             resource_signer,
             mint_configuration.collection_name,
             string::utf8(TOKEN_DESCRIPTION),
-            string::utf8(b"mint_timestamp"),
+            mint_configuration.token_name,
             mint_configuration.token_uri,
             vector<String> [ string::utf8(b"mint_timestamp") ],
             vector<String> [ string::utf8(b"u64") ],
@@ -115,17 +118,46 @@ module mint_nft_v2_part3::create_nft_with_resource_and_admin_accounts {
         object::transfer(resource_signer, token_object, signer::address_of(receiver));
     }
 
-    // set admin?
-
-    // ensure admin is owner of the signercapability for the collection creator
+    public entry fun set_admin(
+        current_admin: &signer,
+        new_admin_addr: address,
+        resource_addr: address,
+    ) acquires MintConfiguration {
+        let mint_configuration = borrow_global_mut<MintConfiguration>(resource_addr);
+        let current_admin_addr = signer::address_of(current_admin);
+        // ensure the signer attempting to change the admin is the current admin
+        assert!(current_admin_addr == mint_configuration.admin, error::permission_denied(ENOT_AUTHORIZED));
+        // ensure the new admin address is an account that's been initialized so we don't accidentally lock ourselves out
+        assert!(account::exists_at(new_admin_addr), error::not_found(ENOT_FOUND));
+        mint_configuration.admin = new_admin_addr;
+    }
     
-    public entry fun set_minting_enabled(admin: &signer, minting_enabled: bool) acquires MintConfiguration {
+    public entry fun set_minting_enabled(
+        admin: &signer,
+        minting_enabled: bool,
+        resource_addr: address,
+    ) acquires MintConfiguration {
+        let mint_configuration = borrow_global_mut<MintConfiguration>(resource_addr);
         let admin_addr = signer::address_of(admin);
-        let mint_configuration = borrow_global_mut<MintConfiguration>(@mint_nft_v2_part3);
+        // abort if the signer is not the admin
+        assert!(admin_addr == mint_configuration.admin, error::permission_denied(ENOT_AUTHORIZED));
+        mint_configuration.minting_enabled = minting_enabled;
+    }
+
+    public entry fun set_expiration_timestamp(
+        admin: &signer,
+        expiration_timestamp: u64,
+        resource_addr: address,
+    ) acquires MintConfiguration {
+        let mint_configuration = borrow_global_mut<MintConfiguration>(resource_addr);
+        let admin_addr = signer::address_of(admin);
+        // abort if the signer is not the admin
+        assert!(admin_addr == mint_configuration.admin, error::permission_denied(ENOT_AUTHORIZED));
+        mint_configuration.expiration_timestamp = expiration_timestamp;
     }
 
     #[view]
     public fun get_resource_address(collection_name: String): address {
-        account::create_resource_address(&@mint_nft_v2_part2, *string::bytes(&collection_name))
+        account::create_resource_address(&@mint_nft_v2_part3, *string::bytes(&collection_name))
     }
 }
