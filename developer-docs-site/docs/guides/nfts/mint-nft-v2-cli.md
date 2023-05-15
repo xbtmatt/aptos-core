@@ -587,3 +587,151 @@ aptos move run --function-id default::create_nft_with_resource_and_admin_account
 
 Try to mint again, and it should succeed! You can try setting the admin with the `set_admin(...)` call and then set the `expiration_timestamp` and `minting_enabled` fields on your own. Use the correct and incorrect admin to see how it works.
 
+## 4. Add custom minting events, enable signature verification, and write unit tests
+
+For the last part of this tutorial we're going to:
+
+1. Add a `TokenMintingEvent` that we emit whenever a user calls the `mint` function successfully
+2. Limit a user from minting unlimited NFTs by verifying the owner's intent to mint to that user with an off-chain signature from the `admin` account
+3. Write unit tests for our code
+
+### Add a TokenMintingEvent and emit it in the mint function
+
+Here are the highlighted TokenMintingEvent related changes to our data structures:
+
+```rust
+struct TokenMintingEvent has drop, store {
+    token_receiver_address: address,
+    creator: address,
+    collection_name: String,
+    token_name: String,
+}
+
+struct MintConfiguration has key {
+    // ...
+    token_minting_events: EventHandle<TokenMintingEvent>,
+}
+```
+
+Initialize the `EventHandle` in the `initialize_collection` function:
+
+```rust
+public entry fun initialize_collection(...) {
+    // ...
+
+    move_to(&resource_signer, MintConfiguration {
+        // ...
+
+        token_minting_events: account::new_event_handle<TokenMintingEvent>(&resource_signer);
+    });
+}
+```
+
+Add the event emission function in `mint`:
+
+```rust
+public entry fun mint(receiver: &signer, resource_addr: address) acquires MintConfiguration {
+    // ...
+
+    event::emit_event<TokenMintingEvent>(
+        &mut mint_configuration.token_minting_events,
+        TokenMintingEvent {
+            token_receiver_address: receiver_addr,
+            creator: resource_addr,
+            collection_name: mint_configuration.collection_name,
+            token_name: mint_configuration.token_name,
+        }
+    );
+}
+```
+
+Now whenever a user mints, a `TokenMintingEvent` will be emitted. You can view the events in a transaction on the Aptos explorer by looking up the transaction and viewing the Events section. Here are the events of the first transaction ever as an example: https://explorer.aptoslabs.com/txn/1/events?network=mainnet
+
+Read more about events [here](https://aptos.dev/concepts/events/).
+
+Next, let's verify that when a user tries to mint, they can prove that the admin intends to mint an NFT to them.
+
+We'll add this to our resources:
+
+```rust
+// This struct stores the challenge message that proves that the resource signer wants to mint this token
+// to the receiver. This struct will need to be signed by the resource signer to pass the verification.
+struct MintProofChallenge has drop {
+    receiver_account_sequence_number: u64,
+    receiver_account_address: address,
+    creator: address,
+    collection_name: String,
+    token_name: String,
+}
+```
+
+If we just have the admin sign a struct with those 5 fields but don't include the module name, address, and resource, there's a potential vulnerability in the contract. We'll review this vulnerability below in the warning section.
+
+Let's write the `verify_proof_of_knowledge` function that we add to the mint function later:
+
+```rust
+    /// Verify that the collection token minter intends to mint the given token_data_id to the receiver
+    fun verify_proof_of_knowledge(
+        receiver_addr: address,
+        mint_proof_signature: vector<u8>,
+        collection_name: String,
+        creator: address,
+        token_name: String,
+        public_key: ValidatedPublicKey,
+    ) {
+        let sequence_number = account::get_sequence_number(receiver_addr);
+
+        let proof_challenge = MintProofChallenge {
+            receiver_account_sequence_number: sequence_number,
+            receiver_account_address: receiver_addr,
+            collection_name,
+            creator,
+            token_name,
+        };
+
+        let signature = ed25519::new_signature_from_bytes(mint_proof_signature);
+        let unvalidated_public_key = ed25519::public_key_to_unvalidated(&public_key);
+        assert!(ed25519::signature_verify_strict_t(&signature, &unvalidated_public_key, proof_challenge), error::invalid_argument(EINVALID_PROOF_OF_KNOWLEDGE));
+    }
+```
+
+Let's go over what we're actually going to use this for:
+
+1. The signature of the struct by the admin represents their intent to mint a token to `receiver_account_address`. The `receiver` possessing this is a cryptographic concept called proof of knowledge.
+
+2. We will expand the signed data on-chain and verify that the signer of the transaction, `receiver`, has an address that matches the `receiver_account_address`.
+
+3. The `receiver_account_sequence_number` is included to disallow stale signatures. If the `receiver` submits another transaction to the network successfully, their account's sequence number increases, and a signed `MintProofChallenge` with the old sequence number will fail.
+
+4. The other 3 fields are used to verify that the token being minted is correct.
+
+We add this to our mint function: 
+
+```rust
+public entry fun mint(
+    receiver: &signer,
+    resource_addr: address,
+    mint_proof_signature: vector<u8>
+) acquires MintConfiguration {
+    // ...
+    verify_proof_of_knowledge(receiver_addr,
+        mint_proof_signature,
+        module_data.collection_name,
+        @mint_nft_v2_part4,
+        module_data.token_name,
+        module_data.public_key);
+    // ...
+}
+```
+
+
+
+
+
+
+
+
+// chain_id? test this on diff networks. the example would be say u deploy contract on devnet and let user test it and give them proof of knowledge, but you don't intend for them to use it on mainnet
+// then they use it anyway because everything else is  identical except chain_id
+
+:::
