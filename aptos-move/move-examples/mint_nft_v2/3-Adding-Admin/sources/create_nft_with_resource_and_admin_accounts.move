@@ -5,6 +5,8 @@ module mint_nft_v2_part3::create_nft_with_resource_and_admin_accounts {
     use std::object;
     use std::string::{Self, String};
     use std::timestamp;
+    use std::vector;
+    use std::table::{Self, Table};
     use aptos_framework::account::{Self, SignerCapability};
 
     use aptos_token_objects::aptos_token::{Self, AptosToken};
@@ -15,6 +17,7 @@ module mint_nft_v2_part3::create_nft_with_resource_and_admin_accounts {
         collection_name: String,
         token_name: String,
         token_uri: String,
+        whitelist: Table<address, bool>,
         expiration_timestamp: u64,
         minting_enabled: bool,
         admin: address,
@@ -27,6 +30,8 @@ module mint_nft_v2_part3::create_nft_with_resource_and_admin_accounts {
     const EMINTING_DISABLED: u64 = 3;
     /// The requested admin account does not exist
     const ENOT_FOUND: u64 = 4;
+    /// The user account is not in the whitelist
+    const ENOT_IN_WHITELIST: u64 = 5;
 
     const COLLECTION_DESCRIPTION: vector<u8> = b"Your collection description here!";
     const TOKEN_DESCRIPTION: vector<u8> = b"Your token description here!";
@@ -80,6 +85,7 @@ module mint_nft_v2_part3::create_nft_with_resource_and_admin_accounts {
             collection_name,
             token_name,
             token_uri,
+            whitelist: table::new<address, bool>(),
             expiration_timestamp: timestamp::now_seconds() - 1,
             minting_enabled: false,
             admin: owner_addr,
@@ -95,6 +101,8 @@ module mint_nft_v2_part3::create_nft_with_resource_and_admin_accounts {
         assert!(timestamp::now_seconds() < mint_configuration.expiration_timestamp, error::permission_denied(ECOLLECTION_EXPIRED));
         // throw an error if minting is disabled
         assert!(mint_configuration.minting_enabled, error::permission_denied(EMINTING_DISABLED));
+        // abort if user is not in whitelist
+        assert!(table::contains(&mint_configuration.whitelist, signer::address_of(receiver)), ENOT_IN_WHITELIST);
 
         let signer_cap = &mint_configuration.signer_capability;
         let resource_signer: &signer = &account::create_signer_with_capability(signer_cap);
@@ -130,6 +138,36 @@ module mint_nft_v2_part3::create_nft_with_resource_and_admin_accounts {
         // ensure the new admin address is an account that's been initialized so we don't accidentally lock ourselves out
         assert!(account::exists_at(new_admin_addr), error::not_found(ENOT_FOUND));
         mint_configuration.admin = new_admin_addr;
+    }
+
+    public entry fun add_to_whitelist(
+        admin: &signer,
+        addresses: vector<address>,
+        resource_addr: address
+    ) acquires MintConfiguration {
+        let admin_addr = signer::address_of(admin);
+        let mint_configuration = borrow_global_mut<MintConfiguration>(resource_addr);
+        assert!(admin_addr == mint_configuration.admin, error::permission_denied(ENOT_AUTHORIZED));
+
+        vector::for_each(addresses, |user_addr| {
+            // note that this will abort in `table` if the address exists already- use `upsert` to ignore this
+            table::add(&mut mint_configuration.whitelist, user_addr, true);
+        });
+    }
+
+    public entry fun remove_from_whitelist(
+        admin: &signer,
+        addresses: vector<address>,
+        resource_addr: address
+    ) acquires MintConfiguration {
+        let admin_addr = signer::address_of(admin);
+        let mint_configuration = borrow_global_mut<MintConfiguration>(resource_addr);
+        assert!(admin_addr == mint_configuration.admin, error::permission_denied(ENOT_AUTHORIZED));
+
+        vector::for_each(addresses, |user_addr| {
+            // note that this will abort in `table` if the address is not found
+            table::remove(&mut mint_configuration.whitelist, user_addr);
+        });
     }
     
     public entry fun set_minting_enabled(

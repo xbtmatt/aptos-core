@@ -410,15 +410,17 @@ It may not feel different since you're acting as the owner and the receiver all 
 
 In the first section, the user has to wait for the owner of the contract to mint and send them an NFT. In the second section, the user can request to mint and receive an NFT themselves.
 
-## 3. Adding an end time, an admin, and an enabled flag
+## 3. Adding restrictions: a whitelist, an end time, an admin, and an enabled flag
 
 We're still missing some very common features for NFT minting contracts:
 
-1. A start and end time
-2. The ability to enable or disable the mint
-3. An admin that can alter #1 and #2
+1. A whitelist that restricts minting to whitelisted addresses
+2. The ability to add/remove addresses from the whitelist
+3. A start* and end time
+4. The ability to enable or disable the mint
+5. An admin model: restricting using these functions to an assigned admin account
 
-To keep things simple, we're not going to set a start time, but we'll add the other functionality to the contract.
+*We don't add a start time in this tutorial for the sake of brevity since it's very similar to adding an end time.
 
 ### Adding the new configuration options
 
@@ -427,13 +429,16 @@ We need to add the expiration timestamp, the enabled flag, and the admin address
 ```rust
 struct MintConfiguration has key {
     // ...
+    whitelist: Table<address, bool>,
     expiration_timestamp: u64,
     minting_enabled: bool,
     admin: address,
 }
 ```
 
-When we initialize the collection, we default to an expired timestamp that's one second in the past and disable the mint:
+Note that we're storing a `bool` in the whitelist as the value in each key: value pair. We won't use it in this tutorial, but you could easily use it to limit each account to 1 mint or even use an integer type to limit it to an arbitrary number of mints.  
+
+When we initialize the collection, we create a default empty whitelist, an expiration timestamp that's one second in the past, and disable the mint:
 
 ```rust
 public entry fun initialize_collection( /* ... */ ) {
@@ -441,7 +446,7 @@ public entry fun initialize_collection( /* ... */ ) {
 
     move_to(&resource_signer, MintConfiguration {
         // ...
-
+        whitelist: table::new<address, bool>(),
         expiration_timestamp: timestamp::now_seconds() - 1,
         minting_enabled: false,
         admin: owner_addr,
@@ -457,10 +462,12 @@ We can utilize these fields to enforce restrictions on the mint function by abor
 public entry fun mint(receiver: &signer, resource_addr: address) acquires MintConfiguration {
     // ...
 
-    // throw an error if this function is called after the expiration_timestamp
+    // abort if this function is called after the expiration_timestamp
     assert!(timestamp::now_seconds() < mint_configuration.expiration_timestamp, error::permission_denied(ECOLLECTION_EXPIRED));
-    // throw an error if minting is disabled
+    // abort if minting is disabled
     assert!(mint_configuration.minting_enabled, error::permission_denied(EMINTING_DISABLED));
+    // abort if user is not in whitelist
+    assert!(table::contains(&mint_configuration.whitelist, receiver_addr), ENOT_IN_WHITELIST);
 
     // ...
 }
@@ -498,7 +505,7 @@ public entry fun set_admin(
     resource_addr: address,
 ) acquires MintConfiguration {
     let mint_configuration = borrow_global_mut<MintConfiguration>(resource_addr);
-    let current_admin_addr = signer::address_of(current_admin);    
+    let current_admin_addr = signer::address_of(current_admin);
     // ensure the signer attempting to change the admin is the current admin
     assert!(current_admin_addr == mint_configuration.admin, error::permission_denied(ENOT_AUTHORIZED));
     // ensure the new admin address is an account that's been initialized so we don't accidentally lock ourselves out
@@ -507,6 +514,34 @@ public entry fun set_admin(
 }
 ```
 Note the extra error check to make sure the new admin account exists. If we don't check this, we could accidentally lock ourselves out by setting the admin to an account that doesn't exist yet.
+
+Now let's add our add_to_whitelist and remove_from_whitelist functions. They're very similar, so we'll just show the former:
+
+```rust
+public entry fun add_to_whitelist(
+    admin: &signer,
+    addresses: vector<address>,
+    resource_addr: address
+) acquires MintConfiguration {
+    let admin_addr = signer::address_of(admin);
+    let mint_configuration = borrow_global_mut<MintConfiguration>(resource_addr);
+    assert!(admin_addr == mint_configuration.admin, error::permission_denied(ENOT_AUTHORIZED));
+
+    vector::for_each(addresses, |user_addr| {
+        // note that this will abort in `table` if the address exists already- use `upsert` to ignore this
+        table::add(&mut mint_configuration.whitelist, user_addr, true);
+    });
+}
+```
+
+Most of this is fairly straightforward, although note the new inline function we use with `for_each`. This is a functional programming construct Aptos Move offers that lets us run an inline function over each element in a vector. `user_addr` is the locally named element that's passed into the `for_each` function block.
+
+:::tip Why do we use a table instead of a vector for the whitelist?
+You might be tempted to use a `vector<address>` for this, but the lookup time of a vector gets prohibitively expensive when the size of the list starts growing into the thousands.
+
+A Table offers very efficient lookup times. Since it's a hashing function, it's an O(1) lookup time. A vector is O(n). When it comes to thousands of calls on-chain, that can make a substantial difference in execution cost and time.
+:::
+
 
 ### Publishing the module and running the contract
 
@@ -585,14 +620,31 @@ aptos move run --function-id default::create_nft_with_resource_and_admin_account
                    address:YOUR_RESOURCE_ADDRESS_HERE   
 ```
 
-Try to mint again, and it should succeed! You can try setting the admin with the `set_admin(...)` call and then set the `expiration_timestamp` and `minting_enabled` fields on your own. Use the correct and incorrect admin to see how it works.
+Last error we'll get is the user not being on the whitelist:
 
-## 4. Add custom minting events, enable signature verification, and write unit tests
+```shell
+"ENOT_IN_WHITELIST(0x5): The user account is not in the whitelist"
+```
 
-For the last part of this tutorial we're going to:
+Add the user to the whitelist:
 
-1. Add a `TokenMintingEvent` that we emit whenever a user calls the `mint` function successfully
-2. Limit a user from minting unlimited NFTs by verifying the owner's intent to mint to that user with an off-chain signature from the `admin` account
+```shell
+aptos move run --function-id default::create_nft_with_resource_and_admin_accounts::add_to_whitelist \
+               --profile default                           \
+               --args                                      \
+                   "vector<address>:nft-receiver"          \
+                   address:YOUR_RESOURCE_ADDRESS_HERE
+```
+
+Try to mint again, and it should succeed! You can try setting the admin with the `set_admin(...)` call and then set the `whitelist`, `expiration_timestamp` and `minting_enabled` fields on your own. Use the correct and incorrect admin to see how it works.
+
+
+## 4. Adding a public phase, custom events, and unit tests
+
+We've got most of the basics down, but there are some additions we can still make to round out the contract:
+
+1. Add a public phase after the whitelist phase where accounts not on the whitelist are allowed to mint
+2. Add a `TokenMintingEvent` that we emit whenever a user calls the `mint` function successfully
 3. Write unit tests for our code
 
 ### Add a TokenMintingEvent and emit it in the mint function
@@ -648,90 +700,3 @@ public entry fun mint(receiver: &signer, resource_addr: address) acquires MintCo
 Now whenever a user mints, a `TokenMintingEvent` will be emitted. You can view the events in a transaction on the Aptos explorer by looking up the transaction and viewing the Events section. Here are the events of the first transaction ever as an example: https://explorer.aptoslabs.com/txn/1/events?network=mainnet
 
 Read more about events [here](https://aptos.dev/concepts/events/).
-
-Next, let's verify that when a user tries to mint, they can prove that the admin intends to mint an NFT to them.
-
-We'll add this to our resources:
-
-```rust
-// This struct stores the challenge message that proves that the resource signer wants to mint this token
-// to the receiver. This struct will need to be signed by the resource signer to pass the verification.
-struct MintProofChallenge has drop {
-    receiver_account_sequence_number: u64,
-    receiver_account_address: address,
-    creator: address,
-    collection_name: String,
-    token_name: String,
-}
-```
-
-If we just have the admin sign a struct with those 5 fields but don't include the module name, address, and resource, there's a potential vulnerability in the contract. We'll review this vulnerability below in the warning section.
-
-Let's write the `verify_proof_of_knowledge` function that we add to the mint function later:
-
-```rust
-    /// Verify that the collection token minter intends to mint the given token_data_id to the receiver
-    fun verify_proof_of_knowledge(
-        receiver_addr: address,
-        mint_proof_signature: vector<u8>,
-        collection_name: String,
-        creator: address,
-        token_name: String,
-        public_key: ValidatedPublicKey,
-    ) {
-        let sequence_number = account::get_sequence_number(receiver_addr);
-
-        let proof_challenge = MintProofChallenge {
-            receiver_account_sequence_number: sequence_number,
-            receiver_account_address: receiver_addr,
-            collection_name,
-            creator,
-            token_name,
-        };
-
-        let signature = ed25519::new_signature_from_bytes(mint_proof_signature);
-        let unvalidated_public_key = ed25519::public_key_to_unvalidated(&public_key);
-        assert!(ed25519::signature_verify_strict_t(&signature, &unvalidated_public_key, proof_challenge), error::invalid_argument(EINVALID_PROOF_OF_KNOWLEDGE));
-    }
-```
-
-Let's go over what we're actually going to use this for:
-
-1. The signature of the struct by the admin represents their intent to mint a token to `receiver_account_address`. The `receiver` possessing this is a cryptographic concept called proof of knowledge.
-
-2. We will expand the signed data on-chain and verify that the signer of the transaction, `receiver`, has an address that matches the `receiver_account_address`.
-
-3. The `receiver_account_sequence_number` is included to disallow stale signatures. If the `receiver` submits another transaction to the network successfully, their account's sequence number increases, and a signed `MintProofChallenge` with the old sequence number will fail.
-
-4. The other 3 fields are used to verify that the token being minted is correct.
-
-We add this to our mint function: 
-
-```rust
-public entry fun mint(
-    receiver: &signer,
-    resource_addr: address,
-    mint_proof_signature: vector<u8>
-) acquires MintConfiguration {
-    // ...
-    verify_proof_of_knowledge(receiver_addr,
-        mint_proof_signature,
-        module_data.collection_name,
-        @mint_nft_v2_part4,
-        module_data.token_name,
-        module_data.public_key);
-    // ...
-}
-```
-
-
-
-
-
-
-
-
-// chain_id? test this on diff networks. the example would be say u deploy contract on devnet and let user test it and give them proof of knowledge, but you don't intend for them to use it on mainnet
-// then they use it anyway because everything else is  identical except chain_id
-
-:::
