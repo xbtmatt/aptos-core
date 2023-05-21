@@ -410,15 +410,17 @@ It may not feel different since you're acting as the owner and the receiver all 
 
 In the first section, the user has to wait for the owner of the contract to mint and send them an NFT. In the second section, the user can request to mint and receive an NFT themselves.
 
-## 3. Adding an end time, an admin, and an enabled flag
+## 3. Adding restrictions: a whitelist, an end time, an admin, and an enabled flag
 
 We're still missing some very common features for NFT minting contracts:
 
-1. A start and end time
-2. The ability to enable or disable the mint
-3. An admin that can alter #1 and #2
+1. A whitelist that restricts minting to whitelisted addresses
+2. The ability to add/remove addresses from the whitelist
+3. A start* and end time
+4. The ability to enable or disable the mint
+5. An admin model: restricting using these functions to an assigned admin account
 
-To keep things simple, we're not going to set a start time, but we'll add the other functionality to the contract.
+*We don't add a start time in this tutorial for the sake of brevity since it's very similar to adding an end time.
 
 ### Adding the new configuration options
 
@@ -427,13 +429,16 @@ We need to add the expiration timestamp, the enabled flag, and the admin address
 ```rust
 struct MintConfiguration has key {
     // ...
+    whitelist: Table<address, bool>,
     expiration_timestamp: u64,
     minting_enabled: bool,
     admin: address,
 }
 ```
 
-When we initialize the collection, we default to an expired timestamp that's one second in the past and disable the mint:
+Note that we're storing a `bool` in the whitelist as the value in each key: value pair. We won't use it in this tutorial, but you could easily use it to limit each account to 1 mint or even use an integer type to limit it to an arbitrary number of mints.  
+
+When we initialize the collection, we create a default empty whitelist, an expiration timestamp that's one second in the past, and disable the mint:
 
 ```rust
 public entry fun initialize_collection( /* ... */ ) {
@@ -441,7 +446,7 @@ public entry fun initialize_collection( /* ... */ ) {
 
     move_to(&resource_signer, MintConfiguration {
         // ...
-
+        whitelist: table::new<address, bool>(),
         expiration_timestamp: timestamp::now_seconds() - 1,
         minting_enabled: false,
         admin: owner_addr,
@@ -457,10 +462,12 @@ We can utilize these fields to enforce restrictions on the mint function by abor
 public entry fun mint(receiver: &signer, resource_addr: address) acquires MintConfiguration {
     // ...
 
-    // throw an error if this function is called after the expiration_timestamp
+    // abort if this function is called after the expiration_timestamp
     assert!(timestamp::now_seconds() < mint_configuration.expiration_timestamp, error::permission_denied(ECOLLECTION_EXPIRED));
-    // throw an error if minting is disabled
+    // abort if minting is disabled
     assert!(mint_configuration.minting_enabled, error::permission_denied(EMINTING_DISABLED));
+    // abort if user is not in whitelist
+    assert!(table::contains(&mint_configuration.whitelist, receiver_addr), ENOT_IN_WHITELIST);
 
     // ...
 }
@@ -507,6 +514,34 @@ public entry fun set_admin(
 }
 ```
 Note the extra error check to make sure the new admin account exists. If we don't check this, we could accidentally lock ourselves out by setting the admin to an account that doesn't exist yet.
+
+Now let's add our add_to_whitelist and remove_from_whitelist functions. They're very similar, so we'll just show the former:
+
+```rust
+public entry fun add_to_whitelist(
+    admin: &signer,
+    addresses: vector<address>,
+    resource_addr: address
+) acquires MintConfiguration {
+    let admin_addr = signer::address_of(admin);
+    let mint_configuration = borrow_global_mut<MintConfiguration>(resource_addr);
+    assert!(admin_addr == mint_configuration.admin, error::permission_denied(ENOT_AUTHORIZED));
+
+    vector::for_each(addresses, |user_addr| {
+        // note that this will abort in `table` if the address exists already- use `upsert` to ignore this
+        table::add(&mut mint_configuration.whitelist, user_addr, true);
+    });
+}
+```
+
+Most of this is fairly straightforward, although note the new inline function we use with `for_each`. This is a functional programming construct Aptos Move offers that lets us run an inline function over each element in a vector. `user_addr` is the locally named element that's passed into the `for_each` function block.
+
+:::tip Why do we use a table instead of a vector for the whitelist?
+You might be tempted to use a `vector<address>` for this, but the lookup time of a vector gets prohibitively expensive when the size of the list starts growing into the thousands.
+
+A Table offers very efficient lookup times. Since it's a hashing function, it's an O(1) lookup time. A vector is O(n). When it comes to thousands of calls on-chain, that can make a substantial difference in execution cost and time.
+:::
+
 
 ### Publishing the module and running the contract
 
@@ -585,88 +620,20 @@ aptos move run --function-id default::create_nft_with_resource_and_admin_account
                    address:YOUR_RESOURCE_ADDRESS_HERE   
 ```
 
-Try to mint again, and it should succeed! You can try setting the admin with the `set_admin(...)` call and then set the `expiration_timestamp` and `minting_enabled` fields on your own. Use the correct and incorrect admin to see how it works.
+Last error we'll get is the user not being on the whitelist:
 
-## 4. Adding a customizable whitelist, custom events, and unit tests
-
-We've set restrictions for *when* a user can mint, but we have no rules regarding how many times or which users can mint. This is the purpose of a whitelist- only allowing certain accounts to mint, often with a restriction on how many times. We also want to add custom events so that when a user mints, an event is emitted on-chain that describes details about the mint transaction.
-
-1. Add a whitelist that restricts minting to whitelisted addresses
-2. Add the ability to add/remove addresses from the whitelist
-3. Emit a custom event when a user mints
-4. Explore and discuss the implications of using different data structures
-### Adding a whitelist
-
-The functionality of a whitelist is very simple: we abort if the address doesn't exist in the list. 
-
-Let's explore the different data structures we could use for this:
-
-1. You might be tempted to use a `vector<address>` for this, but the lookup time of a vector gets prohibitively expensive when the size of the list starts growing into the thousands.
-2. A Table offers very efficient lookup times, so we could use `Table<address, bool>` for our whitelist. The `bool` would be a useless field, though, because we'd just be using the `table::contains(...)` function to check that an address exists as a key in the table.
-3. An Object offers us a similar efficient lookup time as a Table, but also allows us to emit minting events from the Object, rather than a single resource. This frees up a bottleneck that would disallow parallelization on the function call. 
-
-Let's use an Object called `MintTicket` to allow the user to "get in" to the mint function. First let's define the data that will go into the object:
-
-```rust
-#[resource_group_member(group = aptos_framework::object::ObjectGroup)]
-struct MintTicket has key {
-    mint_events: event::EventHandle<MintEvent>,
-    extend_ref: ExtendRef,
-}
-
-struct MintEvent has drop, store {
-    collection: String,
-    creator: address,
-    name: String,
-    receiver: address,
-}
+```shell
+"ENOT_IN_WHITELIST(0x5): The user account is not in the whitelist"
 ```
 
-Let's write our add/remove from whitelist functionality:
+Add the user to the whitelist:
 
-```rust
-public entry fun add_to_whitelist(admin: &signer, addresses: vector<address>, resource_addr: address) {
-    assert!(is_admin(admin, resource_addr), error::permission_denied(ENOT_AUTHORIZED));
-    let resource_signer = &account::create_signer_with_capability(&borrow_global<MintConfiguration>.signer_capability);
-
-    vector::for_each(addresses, |user_addr|) {
-        // create a seed from the BCS serialized user address
-        let seed = bcs::to_bytes(&user_addr);
-        // generate the object address to check if it already exists
-        let object_addr = object::create_object_address(&resource_addr, seed);
-        if (!object::exists_at<MintTicket>(object_addr)) {
-            // create the object with our seed (user_address + b"MintTicket")
-            let constructor_ref = object::create_named_object(resource_signer, seed);
-            let object_signer = object::generate_signer(&constructor_ref);
-            move_to(
-                &object_signer,
-                MintTicket {
-                    mint_events: object::new_event_handle(&object_signer),
-                    extend_ref: object::generate_extend_ref(&constructor_ref),
-                }
-            );
-        };
-    };
-}
+```shell
+aptos move run --function-id default::create_nft_with_resource_and_admin_accounts::add_to_whitelist \
+               --profile default                           \
+               --args                                      \
+                   vector<address>:nft-receiver            \
+                   address:YOUR_RESOURCE_ADDRESS_HERE
 ```
 
-
-
-# can you run the inline function of an Object/Module hybrid?
-
-# don't let admin change whitelist while mint is enabled!
-
-
-
-// calculate resource address off chain
-// send it in with minter as signer
-// verify address_of(minter: &signer) is the owner of the Object
-
-:::tip Choosing the right data structure 
-This means we're going to want a data structure that has an efficient lookup time when there's a large set of entries
-:::
-
-### Adding and removing addresses from the whitelist
-
-### Emitting custom events
-
+Try to mint again, and it should succeed! You can try setting the admin with the `set_admin(...)` call and then set the `whitelist`, `expiration_timestamp` and `minting_enabled` fields on your own. Use the correct and incorrect admin to see how it works.
