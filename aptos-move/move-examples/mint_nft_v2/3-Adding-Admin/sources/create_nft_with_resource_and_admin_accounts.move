@@ -97,12 +97,12 @@ module mint_nft_v2_part3::create_nft_with_resource_and_admin_accounts {
         // access the configuration resources stored on-chain at resource_addr's address
         let mint_configuration = borrow_global<MintConfiguration>(resource_addr);
 
-        // throw an error if this function is called after the expiration_timestamp
-        assert!(timestamp::now_seconds() < mint_configuration.expiration_timestamp, error::permission_denied(ECOLLECTION_EXPIRED));
-        // throw an error if minting is disabled
-        assert!(mint_configuration.minting_enabled, error::permission_denied(EMINTING_DISABLED));
         // abort if user is not in whitelist
         assert!(table::contains(&mint_configuration.whitelist, signer::address_of(receiver)), ENOT_IN_WHITELIST);
+        // abort if this function is called after the expiration_timestamp
+        assert!(timestamp::now_seconds() < mint_configuration.expiration_timestamp, error::permission_denied(ECOLLECTION_EXPIRED));
+        // abort if minting is disabled
+        assert!(mint_configuration.minting_enabled, error::permission_denied(EMINTING_DISABLED));
 
         let signer_cap = &mint_configuration.signer_capability;
         let resource_signer: &signer = &account::create_signer_with_capability(signer_cap);

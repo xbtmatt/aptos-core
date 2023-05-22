@@ -420,7 +420,7 @@ We're still missing some very common features for NFT minting contracts:
 4. The ability to enable or disable the mint
 5. An admin model: restricting using these functions to an assigned admin account
 
-*We don't add a start time in this tutorial for the sake of brevity since it's very similar to adding an end time.
+*We add the start time in part 4 to keep this section brief.
 
 ### Adding the new configuration options
 
@@ -456,18 +456,18 @@ public entry fun initialize_collection( /* ... */ ) {
 
 ### Using assertions to enforce rules
 
-We can utilize these fields to enforce restrictions on the mint function by aborting the call with an error message if either of the two conditions aren't met:
+We can utilize these fields to enforce restrictions on the mint function by aborting the call with an error message if any of the conditions aren't met:
 
 ```rust
 public entry fun mint(receiver: &signer, resource_addr: address) acquires MintConfiguration {
     // ...
 
+    // abort if user is not in whitelist
+    assert!(table::contains(&mint_configuration.whitelist, receiver_addr), ENOT_IN_WHITELIST);
     // abort if this function is called after the expiration_timestamp
     assert!(timestamp::now_seconds() < mint_configuration.expiration_timestamp, error::permission_denied(ECOLLECTION_EXPIRED));
     // abort if minting is disabled
     assert!(mint_configuration.minting_enabled, error::permission_denied(EMINTING_DISABLED));
-    // abort if user is not in whitelist
-    assert!(table::contains(&mint_configuration.whitelist, receiver_addr), ENOT_IN_WHITELIST);
 
     // ...
 }
@@ -479,6 +479,8 @@ Function calls with failed assertions don't have side effects. When an error is 
 
 We also need a way to set all of these values, but we don't want to give just anyone the ability to freely set these fields. We can ensure that in our setter functions, the account requesting the change
 is also the designated admin:
+
+### Enabling the mint and setting the expiration time
 
 ```rust
 public entry fun set_minting_enabled(
@@ -495,6 +497,8 @@ public entry fun set_minting_enabled(
 ```
 
 The `set_expiration_timestamp` function is almost identical to `set_minting_enabled`, so we've left it out.
+
+### Setting the admin of the module
 
 If we want to change the admin, we'll do something similar:
 
@@ -514,6 +518,8 @@ public entry fun set_admin(
 }
 ```
 Note the extra error check to make sure the new admin account exists. If we don't check this, we could accidentally lock ourselves out by setting the admin to an account that doesn't exist yet.
+
+### Adding to the whitelist
 
 Now let's add our add_to_whitelist and remove_from_whitelist functions. They're very similar, so we'll just show the former:
 
@@ -645,11 +651,87 @@ We've got most of the basics down, but there are some additions we can still mak
 
 1. Add a public phase after the whitelist phase where accounts not on the whitelist are allowed to mint
 2. Add a `TokenMintingEvent` that we emit whenever a user calls the `mint` function successfully
-3. Write unit tests for our code
+3. Write Move unit tests to more efficiently test our code
 
-### Add a TokenMintingEvent and emit it in the mint function
+### Adding a public phase
 
-Here are the highlighted TokenMintingEvent related changes to our data structures:
+The simplest way to set a public phase is to add a start timestamp for both the public and whitelist minters. 
+
+```rust
+struct MintConfiguration has key {
+    // ...
+    start_timestamp_public: u64,
+    start_timestamp_whitelist: u64,
+}
+
+const U64_MAX: u64 = 18446744073709551615;
+
+public entry fun initialize_collection( ... ) {
+    // ...
+    move_to(&resource_signer, MintConfiguration {
+        // ...
+        // default to an impossibly distant future time to force owner to set this
+        start_timestamp_whitelist: U64_MAX,
+        start_timestamp_public: U64_MAX,
+        // ...
+    });
+}
+```
+
+Then we enforce those restrictions in the mint function again.
+
+We add an abort for trying to mint before the whitelist time, then check to see if the user is even on the whitelist. If they aren't, we abort if the public time hasn't come yet.
+
+If the user is whitelisted and the whitelist time has begun or the public minting has begun, we finish our checks for `expiration_timestamp` and `minting_enabled`.
+
+```rust
+public entry fun mint(receiver: &signer, resource_addr: address) acquires MintConfiguration {
+    // ...
+
+    assert!(timestamp::now_seconds() >= mint_configuration.start_timestamp_whitelist, EWHITELIST_MINT_NOT_STARTED);
+    // we are at least past the whitelist start. Now check for if the user is in the whitelist
+    if (!table::contains(&mint_configuration.whitelist, signer::address_of(receiver))) {
+        // user address is not in the whitelist, assert public minting has begun
+        assert!(timestamp::now_seconds() >= mint_configuration.start_timestamp_public, EPUBLIC_MINT_NOT_STARTED);
+    };
+
+    // abort if this function is called after the expiration_timestamp
+    assert!(timestamp::now_seconds() < mint_configuration.expiration_timestamp, error::permission_denied(ECOLLECTION_EXPIRED));
+    // abort if minting is disabled
+    assert!(mint_configuration.minting_enabled, error::permission_denied(EMINTING_DISABLED));
+
+    // ...
+}
+```
+
+Note that we haven't had a start time- we've been using the `minting_enabled` variable to gate access, but it's better design to have `minting_enabled` as a hard on/off switch for the contract and an actual start time for public and whitelist mints.
+
+Our setter functions are nearly identical to `set_expiration_timestamp` just with a few additional checks to ensure our times make sense with each other:
+
+```rust
+public entry fun set_start_timestamp_public(
+    admin: &signer,
+    start_timestamp_public: u64,
+    resource_addr: address,
+) acquires MintConfiguration {
+    // ...
+    assert!(mint_configuration.start_timestamp_whitelist <= start_timestamp_public, EPUBLIC_NOT_AFTER_WHITELIST);
+    // ...
+}
+public entry fun set_start_timestamp_whitelist(
+    admin: &signer,
+    start_timestamp_whitelist: u64,
+    resource_addr: address,
+) acquires MintConfiguration {
+    // ...
+    assert!(mint_configuration.start_timestamp_public >= start_timestamp_whitelist, EPUBLIC_NOT_AFTER_WHITELIST);
+    // ...
+}
+```
+
+### Adding custom events
+
+In order to use events, we need to create a data structure that will be used to fill out the event data when it's emitted.
 
 ```rust
 struct TokenMintingEvent has drop, store {
@@ -658,14 +740,21 @@ struct TokenMintingEvent has drop, store {
     collection_name: String,
     token_name: String,
 }
+```
 
+```rust
+We need to create an EventHandle so we have somewhere to emit the events from: 
 struct MintConfiguration has key {
     // ...
     token_minting_events: EventHandle<TokenMintingEvent>,
 }
 ```
 
-Initialize the `EventHandle` in the `initialize_collection` function:
+:::warning
+Emitting events to the same resource is a bottleneck in this contract for parallelization. Check out our tutorials on how to parallelize contracts to remove this bottleneck.
+:::
+
+Initialize the `EventHandle` in the `initialize_collection` function and add the event emission function in `mint`:
 
 ```rust
 public entry fun initialize_collection(...) {
@@ -673,15 +762,10 @@ public entry fun initialize_collection(...) {
 
     move_to(&resource_signer, MintConfiguration {
         // ...
-
         token_minting_events: account::new_event_handle<TokenMintingEvent>(&resource_signer);
     });
 }
-```
 
-Add the event emission function in `mint`:
-
-```rust
 public entry fun mint(receiver: &signer, resource_addr: address) acquires MintConfiguration {
     // ...
 
@@ -700,3 +784,135 @@ public entry fun mint(receiver: &signer, resource_addr: address) acquires MintCo
 Now whenever a user mints, a `TokenMintingEvent` will be emitted. You can view the events in a transaction on the Aptos explorer by looking up the transaction and viewing the Events section. Here are the events of the first transaction ever as an example: https://explorer.aptoslabs.com/txn/1/events?network=mainnet
 
 Read more about events [here](https://aptos.dev/concepts/events/).
+
+### Adding unit tests
+
+So far, we've been making sure our code works by running it and checking if we get error codes as expected. This is a messy and inconsistent way of testing our code. It relies upon us not making any mistakes when running the commands in a specific order and that we run these checks every time we add new functionality.
+
+We can leverage Move's native unit testing to create basic checks for our code that ensure our contract is working as expected. Read more about unit testing in Move [here](https://aptos.dev/move/move-on-aptos/cli/#compiling-and-unit-testing-move).
+
+We'll make a simple list of every condition we've added to the contract, implicit or explicit, and ensure that when these conditions are met things go as expected and when they are not met, we get the error we expect.
+
+Let's start with expected errors and when we'd expect to see them. We'll run a unit test for each of these error codes:
+
+```rust
+/// Action not authorized because the signer is not the admin of this module
+const ENOT_AUTHORIZED: u64 = 1;
+/// The collection minting is expired
+const ECOLLECTION_EXPIRED: u64 = 2;
+/// The collection minting is disabled
+const EMINTING_DISABLED: u64 = 3;
+/// The requested admin account does not exist
+const ENOT_FOUND: u64 = 4;
+/// The user account is not in the whitelist
+const ENOT_IN_WHITELIST: u64 = 5;
+/// Whitelist minting hasn't begun yet
+const EWHITELIST_MINT_NOT_STARTED: u64 = 6;
+/// Public minting hasn't begun yet
+const EPUBLIC_MINT_NOT_STARTED: u64 = 7;
+/// The public time must be after the whitelist time
+const EPUBLIC_NOT_AFTER_WHITELIST: u64 = 8;
+```
+
+We also need to test that on-chain resources are changed accordingly if everything goes as expected. We'll refer to these as our positive testing conditions.
+
+# Positive Test Conditions
+
+1. When the collection is initialized, all on-chain resources are initialized in the resource account.
+2. When the admin is changed, the next admin can successfully call admin-only functions.
+3. When any functions that mutate resources are called, the resource on-chain is updated accordingly.
+4. When a user mints successfully, they actually receive the NFT.
+
+:::info
+Running a basic test where everything goes right is called `happy path testing` in testing terminology. It's the most basic way of ensuring that running a program with no errors runs exactly as intended.
+:::
+
+When you're running a unit test with the Aptos Move CLI, the testing environment creates a sort of microcosm where your machine is initializing the entire blockchain and running it for a few seconds in order to simulate your unit tests.
+
+This means that there are no accounts initialized anywhere, the time on-chain hasn't been set, and that you need to set all these things up when you begin your tests. We'll write a helper function that we call in each of our unit tests that initializes our testing environment.
+
+Note that when you see `#[test_only]` above a function, it means the function is a function that can only be called in the test environment. `#[test]` marks a function as a unit test.
+
+```rust
+// dependencies only used in test, if we link without #[test_only], the compiler will warn us
+#[test_only]
+use aptos_std::token_objects::collection::{Self, Collection};
+#[test_only]
+use aptos_std::token_objects::aptos_token::{Self};
+// ...etc
+
+
+#[test_only]
+fun setup_test(
+    owner: &signer,
+    new_admin: &signer,
+    nft_receiver: &signer,
+    nft_receiver2: &signer,
+    aptos_framework: &signer,
+    timestamp: u64,
+) acquires MintConfiguration {
+    timestamp::set_time_has_started_for_testing(aptos_framework);
+    timestamp::update_global_time_for_test_secs(timestamp);
+    account::create_account_for_test(signer::address_of(owner));
+    account::create_account_for_test(signer::address_of(nft_receiver));
+    account::create_account_for_test(signer::address_of(nft_receiver2));
+    account::create_account_for_test(signer::address_of(aptos_framework));
+    account::create_account_for_test(signer::address_of(new_admin));
+    initialize_collection(
+        owner,
+        get_collection_name(),
+        get_collection_uri(),
+        MAXIMUM_SUPPLY,
+        ROYALTY_NUMERATOR,
+        ROYALTY_DENOMINATOR,
+        get_token_name(),
+        get_token_uri(),
+    );
+}
+
+// Helper functions for the default values we've been using.
+// We use these to avoid `utf8` casts, since we can't set `String` type const variables.
+#[test_only]
+const COLLECTION_NAME: vector<u8> = b"Krazy Kangaroos";
+#[test_only]
+public fun get_collection_name(): String { string::utf8(COLLECTION_NAME) }
+// ...etc
+```
+We initialize the time on-chain, set it to `timestamp`, and then create accounts for all of our test accounts. Then we initialize the collection, since it's used in all of our test functions.
+
+Now let's write our happy path. This tests that all the expected functionality is working as intended in a scenario where nothing goes wrong.
+
+We'll write checks for our list #1-#4 above at the end of the test.
+
+In a `#[test]` function, we can specify accounts we want to name, set their address, and pass them in as signers to the function as if they had signed the transaction. For all of our tests, we're going to use the same addresses for simplicity's sake.
+
+Now let's pass them in as signers and set up our happy path test:
+
+```rust
+
+```
+
+For the sake of brevity, we'll only explain a single example of a negative test condition here. We'll test that setting a new admin results in the old admin being unable to call admin-only functions:
+
+```rust
+
+```
+
+:::tip
+Calling the `error` module to emit a specific error function is useful in that it will print out the triple slash comment above the error code when you define it in your module. The error code can be derived by adding the error code value in `error.move` to the `const` value you set it to in your module.
+
+That is, since we call `error::permission_denied(ENOT_AUTHORIZED)` we can derive the error code by knowing that `PERMISSION_DENIED` in `error.move` is `0x5`, and our `ENOT_AUTHORIZED` is `0x1`, so the error code will be `0x50001`.
+:::
+
+
+```shell
+aptos move run --function-id default::create_nft_with_public_phase_and_events::set_expiration_timestamp \
+               --profile default                           \
+               --args                                      \
+                   u64:YOUR_TIMESTAMP_IN_SECONDS_HERE      \
+                   address:YOUR_RESOURCE_ADDRESS_HERE   
+```
+
+```shell
+aptos move publish --named-addresses mint_nft_v2_part1=default --profile default --assume-yes
+```
