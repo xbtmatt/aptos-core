@@ -142,7 +142,7 @@ Property maps are unique polymorphic data structures that enable storing multipl
 
 <br/>
 
-We re-generate the object address with the GUID we generated earlier so we can transfer it to the receiver.
+We generate the object address with the GUID we generated earlier so we can transfer it to the receiver.
 
 ```rust
 let token_object = object::address_to_object<AptosToken>(object::create_guid_object_address(creator_addr, token_creation_num));
@@ -262,9 +262,21 @@ To achieve this, in this section we'll show you how to:
 
 ### What is a resource account?
 
-A resource account is essentially an account that another account can own. They are useful for separating and managing different types of resources, but they're also capable of delegating decisions to sign transactions to the logic in a smart contract.
+A resource account is an account that's used to store and manage resources. When you create a resource account, you can choose to manage its resources through a `SignerCapability`:
 
-If you want to approve a transaction for later, but don't want to have to be present to sign the transaction, you can write Move code to manage the conditional signature from a resource account to approve that transaction. You can view the resource account functionality in [account.move](https://github.com/aptos-labs/aptos-core/blob/main/aptos-move/framework/aptos-framework/sources/account.move) and [resource_account.move](https://github.com/aptos-labs/aptos-core/blob/main/aptos-move/framework/aptos-framework/sources/resource_account.move).
+```rust
+struct SignerCapability has drop, store {
+    account: address
+}
+```
+
+Since the `SignerCapability` is stored on-chain as a resource, you can programmatically retrieve it to manage resources located at the address in the `account` field.
+
+In our case, we create the collection with the resource account upon initialization. When a user requests to mint later on, we retrieve the `SignerCapability` and use it to generate the signer for the `mint(creator: &signer, ...)` function. 
+
+This is what facilitates the autonomous nature of the contract- since the creator is now the resource account, we can program it to approve of a request to mint programmatically!
+
+You can view the resource account functionality in more detail at [account.move](https://github.com/aptos-labs/aptos-core/blob/main/aptos-move/framework/aptos-framework/sources/account.move) and [resource_account.move](https://github.com/aptos-labs/aptos-core/blob/main/aptos-move/framework/aptos-framework/sources/resource_account.move).
 
 ### Adding a resource account to our contract
 
@@ -274,9 +286,7 @@ Most of the code for our contract in this second part is very similar, so we're 
 Please note that in this contract, the resource account will now technically be the `creator` of the collection, so for clarity we've changed the account representing the deployer (you) to be named `owner` and the account that creates the collection and mints tokens to remain `creator.`
 :::
 
-Let's start by adding the `SignerCapability` to our contract, which is the structure that produces the capability to sign a transaction programmatically.
-
-We'll store it in our `MintConfiguration`:
+Let's start by adding the `SignerCapability` to our contract. We'll store it in our `MintConfiguration`:
 
 ```rust
 struct MintConfiguration has key {
@@ -416,11 +426,9 @@ We're still missing some very common features for NFT minting contracts:
 
 1. A whitelist that restricts minting to whitelisted addresses
 2. The ability to add/remove addresses from the whitelist
-3. A start* and end time
+3. An end time
 4. The ability to enable or disable the mint
 5. An admin model: restricting using these functions to an assigned admin account
-
-*We add the start time in part 4 to keep this section brief.
 
 ### Adding the new configuration options
 
@@ -551,7 +559,7 @@ A Table offers very efficient lookup times. Since it's a hashing function, it's 
 
 ### Publishing the module and running the contract
 
-Navigate to the `3-Adding-Admin` directory and publish the module for part 3:
+Navigate to the `3-Adding-Admin-and-Whitelist` directory and publish the module for part 3:
 
 ```shell
 aptos move publish --named-addresses mint_nft_v2_part3=default --profile default --assume-yes
@@ -560,7 +568,7 @@ aptos move publish --named-addresses mint_nft_v2_part3=default --profile default
 Initialize the collection:
 
 ```shell
-aptos move run --function-id default::create_nft_with_resource_and_admin_accounts::initialize_collection   \
+aptos move run --function-id default::adding_admin_and_whitelist::initialize_collection   \
                --profile default                                          \
                --args                                                     \
                   string:"Krazy Kangaroos"                                \
@@ -575,7 +583,7 @@ aptos move run --function-id default::create_nft_with_resource_and_admin_account
 Get the new resource address:
 
 ```shell
-aptos move view --function-id default::create_nft_with_resource_and_admin_accounts::get_resource_address \
+aptos move view --function-id default::adding_admin_and_whitelist::get_resource_address \
                 --profile default \
                 --args string:"Krazy Kangaroos"
 ```
@@ -583,7 +591,7 @@ aptos move view --function-id default::create_nft_with_resource_and_admin_accoun
 Mint as `nft-receiver`:
 
 ```shell
-aptos move run --function-id default::create_nft_with_resource_and_admin_accounts::mint \
+aptos move run --function-id default::adding_admin_and_whitelist::mint \
                --profile nft-receiver \
                --args address:YOUR_RESOURCE_ADDRESS_HERE
 ```
@@ -603,7 +611,7 @@ aptos move view --function-id 0x1::timestamp::now_seconds
 Add enough time to this so you can mint before the timestamp expires.
 
 ```shell
-aptos move run --function-id default::create_nft_with_resource_and_admin_accounts::set_expiration_timestamp \
+aptos move run --function-id default::adding_admin_and_whitelist::set_expiration_timestamp \
                --profile default                           \
                --args                                      \
                    u64:YOUR_TIMESTAMP_IN_SECONDS_HERE      \
@@ -619,7 +627,7 @@ If you try to mint again, you should get a different error this time:
 Enable the mint:
 
 ```shell
-aptos move run --function-id default::create_nft_with_resource_and_admin_accounts::set_minting_enabled \
+aptos move run --function-id default::adding_admin_and_whitelist::set_minting_enabled \
                --profile default                           \
                --args                                      \
                    bool:true                               \
@@ -635,7 +643,7 @@ Last error we'll get is the user not being on the whitelist:
 Add the user to the whitelist:
 
 ```shell
-aptos move run --function-id default::create_nft_with_resource_and_admin_accounts::add_to_whitelist \
+aptos move run --function-id default::adding_admin_and_whitelist::add_to_whitelist \
                --profile default                           \
                --args                                      \
                    "vector<address>:nft-receiver"          \
@@ -649,9 +657,10 @@ Try to mint again, and it should succeed! You can try setting the admin with the
 
 We've got most of the basics down, but there are some additions we can still make to round out the contract:
 
-1. Add a public phase after the whitelist phase where accounts not on the whitelist are allowed to mint
-2. Add a `TokenMintingEvent` that we emit whenever a user calls the `mint` function successfully
-3. Write Move unit tests to more efficiently test our code
+1. Add a start time
+2. Add a public phase after the whitelist phase where accounts not on the whitelist are allowed to mint
+3. Add a `TokenMintingEvent` that we emit whenever a user calls the `mint` function successfully
+4. Write Move unit tests to more efficiently test our code
 
 ### Adding a public phase
 

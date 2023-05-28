@@ -252,6 +252,27 @@ module mint_nft_v2_part4::create_nft_with_public_phase_and_events {
     use std::option::{Self};
 
     #[test_only]
+    const COLLECTION_NAME: vector<u8> = b"Krazy Kangaroos";
+    #[test_only]
+    const TOKEN_NAME: vector<u8> = b"Krazy Kangaroo #1";
+    #[test_only]
+    const TOKEN_URI: vector<u8> = b"https://www.link-to-your-token-image.com";
+    #[test_only]
+    const COLLECTION_URI: vector<u8> = b"https://www.link-to-your-collection-image.com";
+    #[test_only]
+    const ROYALTY_NUMERATOR: u64 = 5;
+    #[test_only]
+    const ROYALTY_DENOMINATOR: u64 = 100;
+    #[test_only]
+    const MAXIMUM_SUPPLY: u64 = 3;
+    #[test_only]
+    const START_TIMESTAMP_PUBLIC: u64 = 100000000;
+    #[test_only]
+    const START_TIMESTAMP_WHITELIST: u64 = 100000000 - 1;
+    #[test_only]
+    const EXPIRATION_TIMESTAMP: u64 = 100000000 + 1;
+
+    #[test_only]
     public fun setup_test(
         owner: &signer,
         nft_receiver: &signer,
@@ -453,27 +474,6 @@ module mint_nft_v2_part4::create_nft_with_public_phase_and_events {
         set_default_timestamps(owner, resource_addr);
         set_start_timestamp_whitelist(owner, START_TIMESTAMP_PUBLIC + 1, resource_addr);
     }
-
-    #[test_only]
-    const COLLECTION_NAME: vector<u8> = b"Krazy Kangaroos";
-    #[test_only]
-    const TOKEN_NAME: vector<u8> = b"Krazy Kangaroo #1";
-    #[test_only]
-    const TOKEN_URI: vector<u8> = b"https://www.link-to-your-token-image.com";
-    #[test_only]
-    const COLLECTION_URI: vector<u8> = b"https://www.link-to-your-collection-image.com";
-    #[test_only]
-    const ROYALTY_NUMERATOR: u64 = 5;
-    #[test_only]
-    const ROYALTY_DENOMINATOR: u64 = 100;
-    #[test_only]
-    const MAXIMUM_SUPPLY: u64 = 3;
-    #[test_only]
-    const START_TIMESTAMP_PUBLIC: u64 = 100000000;
-    #[test_only]
-    const START_TIMESTAMP_WHITELIST: u64 = 100000000 - 1;
-    #[test_only]
-    const EXPIRATION_TIMESTAMP: u64 = 100000000 + 1;
 
     #[test_only]
     public fun get_collection_name(): String { string::utf8(COLLECTION_NAME) }

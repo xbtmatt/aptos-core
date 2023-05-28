@@ -1,4 +1,4 @@
-module mint_nft_v2_part3::create_nft_with_resource_and_admin_accounts {
+module mint_nft_v2_part3::adding_admin_and_whitelist {
     use std::bcs;
     use std::error;
     use std::signer;
@@ -169,7 +169,7 @@ module mint_nft_v2_part3::create_nft_with_resource_and_admin_accounts {
             table::remove(&mut mint_configuration.whitelist, user_addr);
         });
     }
-    
+
     public entry fun set_minting_enabled(
         admin: &signer,
         minting_enabled: bool,
