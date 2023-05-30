@@ -1,6 +1,5 @@
 module mint_nft_v2_part1::create_nft {
     use std::bcs;
-    use std::error;
     use std::signer;
     use std::object;
     use std::string::{Self, String};
@@ -15,8 +14,6 @@ module mint_nft_v2_part1::create_nft {
         token_name: String,
         token_uri: String,
     }
-    /// Action not authorized because the signer is not the admin of this module
-    const ENOT_AUTHORIZED: u64 = 1;
 
     const COLLECTION_DESCRIPTION: vector<u8> = b"Your collection description here!";
     const TOKEN_DESCRIPTION: vector<u8> = b"Your token description here!";
@@ -40,9 +37,6 @@ module mint_nft_v2_part1::create_nft {
         token_name: String,
         token_uri: String,
     ) {
-        // ensure the signer of this function call is also the owner of the contract
-        let creator_addr = signer::address_of(creator);
-        assert!(creator_addr == @mint_nft_v2_part1, error::permission_denied(ENOT_AUTHORIZED));
 
         aptos_token::create_collection(
             creator,
@@ -96,5 +90,21 @@ module mint_nft_v2_part1::create_nft {
         // TODO: Parallelize later; right now this is non-parallelizable due to using the creator's GUID.
         let token_object = object::address_to_object<AptosToken>(object::create_guid_object_address(creator_addr, token_creation_num));
         object::transfer(creator, token_object, receiver_address);
+    }
+
+    /// generates the next token name by concatenating the supply onto the base token name
+    fun next_token_name_from_supply(
+        creator: &signer,
+        base_token_name: String,
+        collection_name: String,
+    ): String {
+        let collection_addr = collection::create_collection_address(&signer::address_of(creator), &collection_name);
+        let collection_object = object::address_to_object<Collection>(collection_addr);
+        let current_supply = option::borrow(&collection::count(collection_object));
+        let format_string = base_token_name;
+        // if base_token_name == Token Name
+        string::append_utf8(&mut format_string, b" #{}");
+        // 'Token Name #1' when supply == 0
+        string_utils::format1(string::bytes(&format_string), *current_supply + 1)
     }
 }

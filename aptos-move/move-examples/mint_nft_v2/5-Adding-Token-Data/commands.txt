@@ -1,0 +1,31 @@
+commands.txt
+
+part 1
+------------------------------------------------------------------------------------
+// publish regular because it literally is not supposed to use a resource account yet...
+aptos move publish --profile default --address-name mint_nft_v2_part1 --named-addresses owner=default --seed part1
+
+aptos init --profile nft-receiver
+aptos move run --function-id default::create_nft::mint --args address:nft-receiver
+
+aptos move run --function-id default::create_nft::initialize_collection --args string:"coll" string::"uri" u64:10 u64:5 u64:100 string:"base token" string:"token_uri"
+
+part 2
+------------------------------------------------------------------------------------
+aptos move create-resource-account-and-publish-package --profile default --address-name mint_nft_v2_part2 --named-addresses owner=default --seed part2
+
+aptos move run --function-id cd20ecb1b93acd94a879242a6e7f35bb15aa7c29a017fe98d01cf9b902e7ca88::create_nft_with_resource_account::initialize_collection --args string:"coll" string::"uri" u64:10 u64:5 u64:100 string:"base token" string:"token_uri"
+aptos move run --function-id cd20ecb1b93acd94a879242a6e7f35bb15aa7c29a017fe98d01cf9b902e7ca88::create_nft_with_resource_account::mint
+
+part 3
+------------------------------------------------------------------------------------
+aptos move create-resource-account-and-publish-package --profile default --address-name mint_nft_v2_part3 --named-addresses owner=default --seed part3
+aptos move run --function-id 5250d71b0a1c634bde6de59960b0202bbe2a3673d9aef4a2449330e45c3de337::adding_admin_and_whitelist::initialize_collection --args string:"coll" string::"uri" u64:10 u64:5 u64:100 string:"base token" string:"token_uri"
+aptos move run --function-id 5250d71b0a1c634bde6de59960b0202bbe2a3673d9aef4a2449330e45c3de337::adding_admin_and_whitelist::set_minting_enabled --args bool:true
+aptos move run --function-id 5250d71b0a1c634bde6de59960b0202bbe2a3673d9aef4a2449330e45c3de337::adding_admin_and_whitelist::mint --args string:"whitelist"
+aptos move run --function-id 5250d71b0a1c634bde6de59960b0202bbe2a3673d9aef4a2449330e45c3de337::adding_admin_and_whitelist::mint --args string:"public"
+
+
+test
+------------------------------------------------------------------------------------
+aptos move test --named-addresses mint_nft_v2_part4=0x1ff99db63dd4ffb9d45288efea474378a12ba44f27b4fb307b16d48b306e4a8d,owner=default

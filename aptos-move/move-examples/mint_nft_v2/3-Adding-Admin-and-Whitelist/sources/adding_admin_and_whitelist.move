@@ -3,35 +3,34 @@ module mint_nft_v2_part3::adding_admin_and_whitelist {
     use std::error;
     use std::signer;
     use std::object;
+    use std::option;
     use std::string::{Self, String};
     use std::timestamp;
-    use std::vector;
-    use std::table::{Self, Table};
+    use std::string_utils;
     use aptos_framework::account::{Self, SignerCapability};
+    use aptos_framework::resource_account;
 
     use aptos_token_objects::aptos_token::{Self, AptosToken};
+    use aptos_token_objects::collection::{Self, Collection};
+    
+    use mint_nft_v2_part3::whitelist;
 
     // This struct stores an NFT collection's relevant information
     struct MintConfiguration has key {
         signer_capability: SignerCapability,
         collection_name: String,
-        token_name: String,
+        base_token_name: String,
         token_uri: String,
-        whitelist: Table<address, bool>,
-        expiration_timestamp: u64,
         minting_enabled: bool,
         admin: address,
     }
+
     /// Action not authorized because the signer is not the admin of this module
     const ENOT_AUTHORIZED: u64 = 1;
-    /// The collection minting is expired
-    const ECOLLECTION_EXPIRED: u64 = 2;
     /// The collection minting is disabled
-    const EMINTING_DISABLED: u64 = 3;
+    const EMINTING_DISABLED: u64 = 2;
     /// The requested admin account does not exist
-    const ENOT_FOUND: u64 = 4;
-    /// The user account is not in the whitelist
-    const ENOT_IN_WHITELIST: u64 = 5;
+    const ENOT_FOUND: u64 = 3;
 
     const COLLECTION_DESCRIPTION: vector<u8> = b"Your collection description here!";
     const TOKEN_DESCRIPTION: vector<u8> = b"Your token description here!";
@@ -44,26 +43,41 @@ module mint_nft_v2_part3::adding_admin_and_whitelist {
     const MUTABLE_TOKEN_URI: bool = false;
     const TOKENS_BURNABLE_BY_CREATOR: bool = false;
     const TOKENS_FREEZABLE_BY_CREATOR: bool = false;
+    const U64_MAX: u64 = 18446744073709551615;
+
+    fun init_module(resource_signer: &signer) {
+        let resource_signer_cap = resource_account::retrieve_resource_account_cap(resource_signer, @owner);
+        move_to(resource_signer, MintConfiguration {
+            signer_capability: resource_signer_cap,
+            collection_name: string::utf8(b""),
+            base_token_name: string::utf8(b""),
+            token_uri: string::utf8(b""),
+            minting_enabled: false,
+            admin: @owner,
+        });
+    }
 
     public entry fun initialize_collection(
-        owner: &signer,
+        admin: &signer,
         collection_name: String,
         collection_uri: String,
         maximum_supply: u64,
         royalty_numerator: u64,
         royalty_denominator: u64,
-        token_name: String,
+        base_token_name: String,
         token_uri: String,
-    ) {
-        // ensure the signer of this function call is also the owner of the contract
-        let owner_addr = signer::address_of(owner);
-        assert!(owner_addr == @mint_nft_v2_part3, error::permission_denied(ENOT_AUTHORIZED));
+    ) acquires MintConfiguration {
+        assert!(signer::address_of(admin) == @owner, error::permission_denied(ENOT_AUTHORIZED));
+        
+        let mint_configuration = borrow_global_mut<MintConfiguration>(@mint_nft_v2_part3);
+        mint_configuration.collection_name = collection_name;
+        mint_configuration.base_token_name = base_token_name;
+        mint_configuration.token_uri = token_uri;
 
-        let seed = *string::bytes(&collection_name);
-        let (resource_signer, resource_signer_cap) = account::create_resource_account(owner, seed);
+        let resource_signer = &account::create_signer_with_capability(&mint_configuration.signer_capability);
 
         aptos_token::create_collection(
-            &resource_signer,
+            resource_signer,
             string::utf8(COLLECTION_DESCRIPTION),
             maximum_supply,
             collection_name,
@@ -80,41 +94,47 @@ module mint_nft_v2_part3::adding_admin_and_whitelist {
             royalty_numerator,
             royalty_denominator,
         );
-        move_to(&resource_signer, MintConfiguration {
-            signer_capability: resource_signer_cap,
-            collection_name,
-            token_name,
-            token_uri,
-            whitelist: table::new<address, bool>(),
-            expiration_timestamp: timestamp::now_seconds() - 1,
-            minting_enabled: false,
-            admin: owner_addr,
-        });
+
+        whitelist::init_tiers(resource_signer);
+        
+        whitelist::upsert_tier_config(
+            resource_signer,
+            string::utf8(b"public"),
+            true, // open_to_public
+            1, // price
+            0, // start_time
+            U64_MAX, // end_time
+            10, // per_user_limit
+        );
     }
 
     /// Mint an NFT to a receiver who requests it.
-    public entry fun mint(receiver: &signer, resource_addr: address) acquires MintConfiguration {
-        // access the configuration resources stored on-chain at resource_addr's address
-        let mint_configuration = borrow_global<MintConfiguration>(resource_addr);
+    public entry fun mint(receiver: &signer, tier_name: String) acquires MintConfiguration {
+        // access the configuration resources stored on-chain at @mint_nft_v2_part3's address
+        let mint_configuration = borrow_global<MintConfiguration>(@mint_nft_v2_part3);
 
-        // abort if user is not in whitelist
-        assert!(table::contains(&mint_configuration.whitelist, signer::address_of(receiver)), ENOT_IN_WHITELIST);
-        // abort if this function is called after the expiration_timestamp
-        assert!(timestamp::now_seconds() < mint_configuration.expiration_timestamp, error::permission_denied(ECOLLECTION_EXPIRED));
         // abort if minting is disabled
         assert!(mint_configuration.minting_enabled, error::permission_denied(EMINTING_DISABLED));
+
+        whitelist::deduct_one_from_tier(receiver, tier_name, @mint_nft_v2_part3);
 
         let signer_cap = &mint_configuration.signer_capability;
         let resource_signer: &signer = &account::create_signer_with_capability(signer_cap);
         // store next GUID to derive object address later
-        let token_creation_num = account::get_guid_next_creation_num(resource_addr);
+        let token_creation_num = account::get_guid_next_creation_num(@mint_nft_v2_part3);
+
+        let token_name = next_token_name_from_supply(
+            resource_signer,
+            mint_configuration.base_token_name,
+            mint_configuration.collection_name,
+        );
 
         // mint token to the receiver
         aptos_token::mint(
             resource_signer,
             mint_configuration.collection_name,
             string::utf8(TOKEN_DESCRIPTION),
-            mint_configuration.token_name,
+            token_name,
             mint_configuration.token_uri,
             vector<String> [ string::utf8(b"mint_timestamp") ],
             vector<String> [ string::utf8(b"u64") ],
@@ -122,80 +142,47 @@ module mint_nft_v2_part3::adding_admin_and_whitelist {
         );
 
         // TODO: Parallelize later; right now this is non-parallelizable due to using the resource_signer's GUID.
-        let token_object = object::address_to_object<AptosToken>(object::create_guid_object_address(resource_addr, token_creation_num));
+        let token_object = object::address_to_object<AptosToken>(object::create_guid_object_address(@mint_nft_v2_part3, token_creation_num));
         object::transfer(resource_signer, token_object, signer::address_of(receiver));
     }
 
     public entry fun set_admin(
-        current_admin: &signer,
+        requesting_admin: &signer,
         new_admin_addr: address,
-        resource_addr: address,
     ) acquires MintConfiguration {
-        let mint_configuration = borrow_global_mut<MintConfiguration>(resource_addr);
-        let current_admin_addr = signer::address_of(current_admin);
-        // ensure the signer attempting to change the admin is the current admin
-        assert!(current_admin_addr == mint_configuration.admin, error::permission_denied(ENOT_AUTHORIZED));
+        let mint_configuration = borrow_global_mut<MintConfiguration>(@mint_nft_v2_part3);
+        let requesting_admin_addr = signer::address_of(requesting_admin);
+        // assert the requesting admin is the admin of the contract
+        assert!(requesting_admin_addr == mint_configuration.admin, error::permission_denied(ENOT_AUTHORIZED));
         // ensure the new admin address is an account that's been initialized so we don't accidentally lock ourselves out
         assert!(account::exists_at(new_admin_addr), error::not_found(ENOT_FOUND));
         mint_configuration.admin = new_admin_addr;
     }
 
-    public entry fun add_to_whitelist(
-        admin: &signer,
-        addresses: vector<address>,
-        resource_addr: address
-    ) acquires MintConfiguration {
-        let admin_addr = signer::address_of(admin);
-        let mint_configuration = borrow_global_mut<MintConfiguration>(resource_addr);
-        assert!(admin_addr == mint_configuration.admin, error::permission_denied(ENOT_AUTHORIZED));
-
-        vector::for_each(addresses, |user_addr| {
-            // note that this will abort in `table` if the address exists already- use `upsert` to ignore this
-            table::add(&mut mint_configuration.whitelist, user_addr, true);
-        });
-    }
-
-    public entry fun remove_from_whitelist(
-        admin: &signer,
-        addresses: vector<address>,
-        resource_addr: address
-    ) acquires MintConfiguration {
-        let admin_addr = signer::address_of(admin);
-        let mint_configuration = borrow_global_mut<MintConfiguration>(resource_addr);
-        assert!(admin_addr == mint_configuration.admin, error::permission_denied(ENOT_AUTHORIZED));
-
-        vector::for_each(addresses, |user_addr| {
-            // note that this will abort in `table` if the address is not found
-            table::remove(&mut mint_configuration.whitelist, user_addr);
-        });
-    }
-
     public entry fun set_minting_enabled(
         admin: &signer,
         minting_enabled: bool,
-        resource_addr: address,
     ) acquires MintConfiguration {
-        let mint_configuration = borrow_global_mut<MintConfiguration>(resource_addr);
+        let mint_configuration = borrow_global_mut<MintConfiguration>(@mint_nft_v2_part3);
         let admin_addr = signer::address_of(admin);
         // abort if the signer is not the admin
         assert!(admin_addr == mint_configuration.admin, error::permission_denied(ENOT_AUTHORIZED));
         mint_configuration.minting_enabled = minting_enabled;
     }
 
-    public entry fun set_expiration_timestamp(
-        admin: &signer,
-        expiration_timestamp: u64,
-        resource_addr: address,
-    ) acquires MintConfiguration {
-        let mint_configuration = borrow_global_mut<MintConfiguration>(resource_addr);
-        let admin_addr = signer::address_of(admin);
-        // abort if the signer is not the admin
-        assert!(admin_addr == mint_configuration.admin, error::permission_denied(ENOT_AUTHORIZED));
-        mint_configuration.expiration_timestamp = expiration_timestamp;
-    }
-
-    #[view]
-    public fun get_resource_address(collection_name: String): address {
-        account::create_resource_address(&@mint_nft_v2_part3, *string::bytes(&collection_name))
+    /// generates the next token name by concatenating the supply onto the base token name
+    fun next_token_name_from_supply(
+        creator: &signer,
+        base_token_name: String,
+        collection_name: String,
+    ): String {
+        let collection_addr = collection::create_collection_address(&signer::address_of(creator), &collection_name);
+        let collection_object = object::address_to_object<Collection>(collection_addr);
+        let current_supply = option::borrow(&collection::count(collection_object));
+        let format_string = base_token_name;
+        // if base_token_name == Token Name
+        string::append_utf8(&mut format_string, b" #{}");
+        // 'Token Name #1' when supply == 0
+        string_utils::format1(string::bytes(&format_string), *current_supply + 1)
     }
 }

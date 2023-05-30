@@ -38,10 +38,13 @@ module mint_nft_v2_part3::whitelist {
     const EMINT_ENDED: u64 = 4;
     /// The account requesting to mint doesn't have enough coins to mint
     const ENOT_ENOUGH_COINS: u64 = 5;
+    /// The requested start time is not before the end time
+    const ESTART_TIME_AFTER_END_TIME: u64 = 6;
 
     public entry fun init_tiers(
         creator: &signer,
     ) {
+        coin::register<AptosCoin>(creator);
         move_to(
             creator,
             Tiers {
@@ -60,6 +63,7 @@ module mint_nft_v2_part3::whitelist {
         end_time: u64,
         per_user_limit: u64,
     ) acquires Tiers {
+        assert!(start_time < end_time, error::invalid_argument(ESTART_TIME_AFTER_END_TIME));
         let creator_addr = signer::address_of(creator);
         if (!exists<Tiers>(creator_addr)) {
             init_tiers(creator);
@@ -88,12 +92,11 @@ module mint_nft_v2_part3::whitelist {
 
     // Note that this module is agnostic to the existence of an 'admin', that is managed from the calling module.
     // we assume that the caller has gated access to this function correctly
-    public(friend) entry fun add_addresses_to_tier(
+    public entry fun add_addresses_to_tier(
         creator: &signer,
         tier_name: String,
         addresses: vector<address>,
     ) acquires Tiers {
-        // get MintTier settings for "tier_name" in the map
         let map = &mut borrow_global_mut<Tiers>(signer::address_of(creator)).map;
         assert!(simple_map::contains_key(map, &tier_name), error::not_found(ETIER_NOT_FOUND));
         let mint_tier = simple_map::borrow_mut(map, &tier_name);
@@ -105,12 +108,11 @@ module mint_nft_v2_part3::whitelist {
 
     // Note that this module is agnostic to the existence of an 'admin', that is managed from the calling module.
     // we assume that the caller has gated access to this function correctly
-    public(friend) entry fun remove_addresses_from_tier(
+    public entry fun remove_addresses_from_tier(
         creator: &signer,
         tier_name: String,
         addresses: vector<address>,
     ) acquires Tiers {
-        // get MintTier settings for "tier_name" in the map
         let map = &mut borrow_global_mut<Tiers>(signer::address_of(creator)).map;
         assert!(simple_map::contains_key(map, &tier_name), error::not_found(ETIER_NOT_FOUND));
         let mint_tier = simple_map::borrow_mut(map, &tier_name);
@@ -120,15 +122,14 @@ module mint_nft_v2_part3::whitelist {
         });
     }
 
-    public(friend) fun deduct_one_from_tier(
+    public entry fun deduct_one_from_tier(
         minter: &signer,
         tier_name: String,
         creator_addr: address,
     ) acquires Tiers {
         let minter_addr = signer::address_of(minter);
 
-        // get MintTier settings for "tier_name" in the map
-        let map = &mut (borrow_global_mut<Tiers>(creator_addr).map);
+        let map = &mut borrow_global_mut<Tiers>(creator_addr).map;
         assert!(simple_map::contains_key(map, &tier_name), error::not_found(ETIER_NOT_FOUND));
         let mint_tier = simple_map::borrow_mut(map, &tier_name);
 
@@ -158,230 +159,5 @@ module mint_nft_v2_part3::whitelist {
 
         // update the value at the user's address in the smart table
         *count = *count + 1;
-    }
-
-    // dependencies only used in test, if we link without #[test_only], the compiler will warn us
-    #[test_only]
-    use std::string::{Self};
-    #[test_only]
-    use std::account;
-    #[test_only]
-    use std::coin::{MintCapability};
-
-    #[test_only]
-    const DEFAULT_START_TIME: u64 = 1;
-    #[test_only]
-    const DEFAULT_CURRENT_TIME: u64 = 2;
-    #[test_only]
-    const DEFAULT_END_TIME: u64 = 3;
-
-
-    #[test_only]
-    public fun setup_test(
-        creator: &signer,
-        account_a: &signer,
-        account_b: &signer,
-        account_c: &signer,
-        aptos_framework: &signer,
-        timestamp: u64,
-    ) {
-        timestamp::set_time_has_started_for_testing(aptos_framework);
-        timestamp::update_global_time_for_test_secs(timestamp);
-        account::create_account_for_test(signer::address_of(creator));
-        let (burn, mint) = aptos_framework::aptos_coin::initialize_for_test(aptos_framework);
-        coin::register<AptosCoin>(creator);
-        setup_account<AptosCoin>(account_a, 4, &mint);
-        setup_account<AptosCoin>(account_b, 4, &mint);
-        setup_account<AptosCoin>(account_c, 2, &mint);
-        coin::destroy_burn_cap(burn);
-        coin::destroy_mint_cap(mint);
-    }
-
-    #[test_only]
-    public fun setup_account<CoinType>(
-        acc: &signer,
-        num_coins: u64,
-        mint: &MintCapability<CoinType>,
-    ) {
-        let addr = signer::address_of(acc);
-        account::create_account_for_test(addr);
-        coin::register<CoinType>(acc);
-        coin::deposit<CoinType>(addr, coin::mint<CoinType>(num_coins, mint));
-    }
-
-    #[test(creator = @0xAA, account_a = @0xFA, account_b = @0xFB, account_c = @0xFC, aptos_framework = @0x1)]
-    public fun test_happy_path(
-        creator: &signer,
-        account_a: &signer,
-        account_b: &signer,
-        account_c: &signer,
-        aptos_framework: &signer,
-    ) acquires Tiers {
-
-        // 1.  Initialize account a, b, c with 4, 3, and 2 APT each.
-        setup_test(creator, account_a, account_b, account_c, aptos_framework, DEFAULT_CURRENT_TIME);
-        let creator_addr = signer::address_of(creator);
-        let address_a = signer::address_of(account_a);
-        let address_b = signer::address_of(account_b);
-        let address_c = signer::address_of(account_c);
-
-        // 2.  Creator creates 3 tiers
-        init_tiers(creator);
-        // tier1: 0 APT, whitelist, per_user_limit = 3, DEFAULT_START_TIME, DEFAULT_END_TIME
-        // tier2: 1 APT, whitelist, per_user_limit = 2, DEFAULT_START_TIME, DEFAULT_END_TIME
-        // tier3: 2 APT, public, per_user_limit = 1, DEFAULT_START_TIME, DEFAULT_END_TIME
-        let open_to_public = true;
-        upsert_tier_config(creator, string::utf8(b"tier1"), !open_to_public, 0, DEFAULT_START_TIME, DEFAULT_END_TIME, 3);
-        upsert_tier_config(creator, string::utf8(b"tier2"), !open_to_public, 1, DEFAULT_START_TIME, DEFAULT_END_TIME, 2);
-        upsert_tier_config(creator, string::utf8(b"tier3"),  open_to_public, 2, DEFAULT_START_TIME, DEFAULT_END_TIME, 1);
-
-        add_addresses_to_tier(creator, string::utf8(b"tier1"), vector<address> [address_a, address_b]);
-        remove_addresses_from_tier(creator, string::utf8(b"tier1"), vector<address> [address_b]);
-        add_addresses_to_tier(creator, string::utf8(b"tier2"), vector<address> [address_a, address_b, address_c]);
-        remove_addresses_from_tier(creator, string::utf8(b"tier2"), vector<address> [address_c]);
-
-        {
-            let map = &(borrow_global<Tiers>(creator_addr).map);
-            let mint_tier1 = simple_map::borrow(map, &string::utf8(b"tier1"));
-            let mint_tier2 = simple_map::borrow(map, &string::utf8(b"tier2"));
-            let mint_tier3 = simple_map::borrow(map, &string::utf8(b"tier3"));
-            assert!( smart_table::contains(&mint_tier1.addresses, address_a) &&
-                    !smart_table::contains(&mint_tier1.addresses, address_b) &&
-                     smart_table::contains(&mint_tier2.addresses, address_a) &&
-                     smart_table::contains(&mint_tier2.addresses, address_b) &&
-                    !smart_table::contains(&mint_tier3.addresses, address_c), 0);
-        };
-
-        deduct_one_from_tier(account_a, string::utf8(b"tier1"), creator_addr);
-        deduct_one_from_tier(account_a, string::utf8(b"tier1"), creator_addr);
-        deduct_one_from_tier(account_a, string::utf8(b"tier1"), creator_addr);
-        deduct_one_from_tier(account_a, string::utf8(b"tier2"), creator_addr);
-        deduct_one_from_tier(account_a, string::utf8(b"tier2"), creator_addr);
-        deduct_one_from_tier(account_a, string::utf8(b"tier3"), creator_addr);
-
-        deduct_one_from_tier(account_b, string::utf8(b"tier2"), creator_addr);
-        deduct_one_from_tier(account_b, string::utf8(b"tier2"), creator_addr);
-        deduct_one_from_tier(account_b, string::utf8(b"tier3"), creator_addr);
-
-        deduct_one_from_tier(account_c, string::utf8(b"tier3"), creator_addr);
-
-        {
-            let map = &(borrow_global<Tiers>(creator_addr).map);
-            let mint_tier1 = simple_map::borrow(map, &string::utf8(b"tier1"));
-            let mint_tier2 = simple_map::borrow(map, &string::utf8(b"tier2"));
-            let mint_tier3 = simple_map::borrow(map, &string::utf8(b"tier3"));
-            assert!(*smart_table::borrow(&mint_tier1.addresses, address_a) == 3 &&
-                    *smart_table::borrow(&mint_tier2.addresses, address_a) == 2 &&
-                    *smart_table::borrow(&mint_tier3.addresses, address_a) == 1 &&
-                    *smart_table::borrow(&mint_tier2.addresses, address_b) == 2 &&
-                    *smart_table::borrow(&mint_tier3.addresses, address_b) == 1 &&
-                    *smart_table::borrow(&mint_tier3.addresses, address_c) == 1, 1);
-        };
-
-        assert!(coin::balance<AptosCoin>(address_a) == 0, 0);
-        assert!(coin::balance<AptosCoin>(address_b) == 0, 0);
-        assert!(coin::balance<AptosCoin>(address_c) == 0, 0);
-
-        assert!(coin::balance<AptosCoin>(creator_addr) == 10, 0);
-    }
-
-    #[test(creator = @0xAA, account_a = @0xFA, account_b = @0xFB, account_c = @0xFC, aptos_framework = @0x1)]
-    #[expected_failure(abort_code = 0x60000, location = mint_nft_v2_part3::whitelist)]
-    public fun test_tier_not_found(
-        creator: &signer,
-        account_a: &signer,
-        account_b: &signer,
-        account_c: &signer,
-        aptos_framework: &signer,
-    ) acquires Tiers {
-        setup_test(creator, account_a, account_b, account_c, aptos_framework, DEFAULT_CURRENT_TIME);
-        let address_a = signer::address_of(account_a);
-        init_tiers(creator);
-        add_addresses_to_tier(creator, string::utf8(b"tier1"), vector<address> [address_a]);
-    }
-
-    #[test(creator = @0xAA, account_a = @0xFA, account_b = @0xFB, account_c = @0xFC, aptos_framework = @0x1)]
-    #[expected_failure(abort_code = 0x50001, location = mint_nft_v2_part3::whitelist)]
-    public fun test_account_not_whitelisted(
-        creator: &signer,
-        account_a: &signer,
-        account_b: &signer,
-        account_c: &signer,
-        aptos_framework: &signer,
-    ) acquires Tiers {
-        setup_test(creator, account_a, account_b, account_c, aptos_framework, DEFAULT_CURRENT_TIME);
-        init_tiers(creator);
-        let open_to_public = true;
-        upsert_tier_config(creator, string::utf8(b"tier1"), !open_to_public, 0, DEFAULT_START_TIME, DEFAULT_END_TIME, 3);
-        deduct_one_from_tier(account_a, string::utf8(b"tier1"), signer::address_of(creator));
-    }
-
-    #[test(creator = @0xAA, account_a = @0xFA, account_b = @0xFB, account_c = @0xFC, aptos_framework = @0x1)]
-    #[expected_failure(abort_code = 0x50002, location = mint_nft_v2_part3::whitelist)]
-    public fun test_no_mints_left(
-        creator: &signer,
-        account_a: &signer,
-        account_b: &signer,
-        account_c: &signer,
-        aptos_framework: &signer,
-    ) acquires Tiers {
-        setup_test(creator, account_a, account_b, account_c, aptos_framework, DEFAULT_CURRENT_TIME);
-        init_tiers(creator);
-        let open_to_public = true;
-        upsert_tier_config(creator, string::utf8(b"tier1"), open_to_public, 0, DEFAULT_START_TIME, DEFAULT_END_TIME, 1);
-        deduct_one_from_tier(account_a, string::utf8(b"tier1"), signer::address_of(creator));
-        deduct_one_from_tier(account_a, string::utf8(b"tier1"), signer::address_of(creator));
-    }
-
-    #[test(creator = @0xAA, account_a = @0xFA, account_b = @0xFB, account_c = @0xFC, aptos_framework = @0x1)]
-    #[expected_failure(abort_code = 0x50003, location = mint_nft_v2_part3::whitelist)]
-    public fun test_mint_not_started(
-        creator: &signer,
-        account_a: &signer,
-        account_b: &signer,
-        account_c: &signer,
-        aptos_framework: &signer,
-    ) acquires Tiers {
-        setup_test(creator, account_a, account_b, account_c, aptos_framework, DEFAULT_CURRENT_TIME);
-        init_tiers(creator);
-        let open_to_public = true;
-        upsert_tier_config(creator, string::utf8(b"tier1"), open_to_public, 0, DEFAULT_START_TIME, DEFAULT_END_TIME, 1);
-        deduct_one_from_tier(account_a, string::utf8(b"tier1"), signer::address_of(creator));
-        upsert_tier_config(creator, string::utf8(b"tier2"), open_to_public, 0, DEFAULT_CURRENT_TIME + 1, DEFAULT_END_TIME, 1);
-        deduct_one_from_tier(account_a, string::utf8(b"tier2"), signer::address_of(creator));
-    }
-
-    #[test(creator = @0xAA, account_a = @0xFA, account_b = @0xFB, account_c = @0xFC, aptos_framework = @0x1)]
-    #[expected_failure(abort_code = 0x50004, location = mint_nft_v2_part3::whitelist)]
-    public fun test_mint_ended(
-        creator: &signer,
-        account_a: &signer,
-        account_b: &signer,
-        account_c: &signer,
-        aptos_framework: &signer,
-    ) acquires Tiers {
-        setup_test(creator, account_a, account_b, account_c, aptos_framework, DEFAULT_CURRENT_TIME);
-        init_tiers(creator);
-        let open_to_public = true;
-        upsert_tier_config(creator, string::utf8(b"tier1"), open_to_public, 0, DEFAULT_START_TIME, DEFAULT_END_TIME, 1);
-        deduct_one_from_tier(account_a, string::utf8(b"tier1"), signer::address_of(creator));
-        upsert_tier_config(creator, string::utf8(b"tier2"), open_to_public, 0, DEFAULT_START_TIME, DEFAULT_END_TIME - 1, 1);
-        deduct_one_from_tier(account_a, string::utf8(b"tier2"), signer::address_of(creator));
-    }
-
-    #[test(creator = @0xAA, account_a = @0xFA, account_b = @0xFB, account_c = @0xFC, aptos_framework = @0x1)]
-    #[expected_failure(abort_code = 0x50005, location = mint_nft_v2_part3::whitelist)]
-    public fun test_not_enough_coins(
-        creator: &signer,
-        account_a: &signer,
-        account_b: &signer,
-        account_c: &signer,
-        aptos_framework: &signer,
-    ) acquires Tiers {
-        setup_test(creator, account_a, account_b, account_c, aptos_framework, DEFAULT_CURRENT_TIME);
-        init_tiers(creator);
-        let open_to_public = true;
-        upsert_tier_config(creator, string::utf8(b"tier1"), open_to_public, 100000000, DEFAULT_START_TIME, DEFAULT_END_TIME, 1);
-        deduct_one_from_tier(account_a, string::utf8(b"tier1"), signer::address_of(creator));
     }
 }
