@@ -12,7 +12,7 @@ module mint_nft_v2_part3::adding_admin_and_whitelist {
 
     use aptos_token_objects::aptos_token::{Self, AptosToken};
     use aptos_token_objects::collection::{Self, Collection};
-    
+
     use mint_nft_v2_part3::whitelist;
 
     // This struct stores an NFT collection's relevant information
@@ -32,8 +32,8 @@ module mint_nft_v2_part3::adding_admin_and_whitelist {
     /// The requested admin account does not exist
     const ENOT_FOUND: u64 = 3;
 
-    const COLLECTION_DESCRIPTION: vector<u8> = b"Your collection description here!";
-    const TOKEN_DESCRIPTION: vector<u8> = b"Your token description here!";
+    const COLLECTION_DESCRIPTION: vector<u8> = b"A bunch of krazy kangaroos.";
+    const TOKEN_DESCRIPTION: vector<u8> = b"A krazy kangaroo!";
     const MUTABLE_COLLECTION_DESCRIPTION: bool = false;
     const MUTABLE_ROYALTY: bool = false;
     const MUTABLE_URI: bool = false;
@@ -68,7 +68,7 @@ module mint_nft_v2_part3::adding_admin_and_whitelist {
         token_uri: String,
     ) acquires MintConfiguration {
         assert!(signer::address_of(admin) == @owner, error::permission_denied(ENOT_AUTHORIZED));
-        
+
         let mint_configuration = borrow_global_mut<MintConfiguration>(@mint_nft_v2_part3);
         mint_configuration.collection_name = collection_name;
         mint_configuration.base_token_name = base_token_name;
@@ -96,7 +96,7 @@ module mint_nft_v2_part3::adding_admin_and_whitelist {
         );
 
         whitelist::init_tiers(resource_signer);
-        
+
         whitelist::upsert_tier_config(
             resource_signer,
             string::utf8(b"public"),
@@ -124,7 +124,7 @@ module mint_nft_v2_part3::adding_admin_and_whitelist {
         let token_creation_num = account::get_guid_next_creation_num(@mint_nft_v2_part3);
 
         let token_name = next_token_name_from_supply(
-            resource_signer,
+            signer::address_of(resource_signer),
             mint_configuration.base_token_name,
             mint_configuration.collection_name,
         );
@@ -172,11 +172,11 @@ module mint_nft_v2_part3::adding_admin_and_whitelist {
 
     /// generates the next token name by concatenating the supply onto the base token name
     fun next_token_name_from_supply(
-        creator: &signer,
+        creator_address: address,
         base_token_name: String,
         collection_name: String,
     ): String {
-        let collection_addr = collection::create_collection_address(&signer::address_of(creator), &collection_name);
+        let collection_addr = collection::create_collection_address(&creator_address, &collection_name);
         let collection_object = object::address_to_object<Collection>(collection_addr);
         let current_supply = option::borrow(&collection::count(collection_object));
         let format_string = base_token_name;

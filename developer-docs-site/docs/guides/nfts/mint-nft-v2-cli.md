@@ -4,13 +4,18 @@ title: "Mint NFTs (v2) with the Aptos CLI"
 
 # Mint NFTs (v2) with the Aptos CLI
 
-This tutorial is intended to demonstrate how to programmatically mint NFTs on Aptos. The simplest version of a minting contract is the NFT collection creator manually minting and sending an NFT to a user.
+This tutorial is intended to demonstrate how to programmatically mint NFTs on Aptos.
 
-We build upon this several times until we eventually create an automated NFT minting smart contract that has:
+The simplest version of a minting contract is the NFT collection creator manually minting and sending an NFT to a user, so we'll start with that and iterate on it several times until we eventually create an automated NFT minting smart contract that has:
+- A mint function that automates minting a token and sending it to a receiver account
 - A whitelist
+- A price the receiver has to pay to mint
+- A start time
 - An end time
 - An admin
 - The ability for the admin to enable & disable the mint
+- Token names that auto-increment
+- The ability to store token metadata for each token that's attached to a token upon mint
 
 ## Prerequisites
 
@@ -20,6 +25,8 @@ This tutorial assumes you have:
 * the `aptos-core` repository checked out: `git clone https://github.com/aptos-labs/aptos-core.git`
 * a basic understanding of Move, NFTs and NFT Collections
 
+Note that the terms "NFT" and "Token" are used interchangeably here. Tokens can be fungible, but we may refer to them as just "Tokens" and imply that they're non-fungible.
+
 ## 1. Creating a simple smart contract to mint an NFT
 
 We're going to start by making the simplest form of the flow for creating a collection and minting a token and sending it to a user. The code for this part of the tutorial is in the first section of the `move-examples/mint_nft_v2_part1` folder in the aptos-core repository.
@@ -27,7 +34,7 @@ We're going to start by making the simplest form of the flow for creating a coll
 Here are the things we need to do first:
 
 * Create the NFT collection and store the configuration options for it
-* Mint a non-fungible token within that collection using the configuration options
+* Mint an NFT within that collection using the configuration options
 * Send the minted token to a user account
 
 ### Defining the configuration options
@@ -44,18 +51,19 @@ struct MintConfiguration has key {
 
 We give `MintConfiguration` the `key` ability so that the module contract can store it at an account's resources, which the module can programmatically retrieve later if we have the account address. The account address we store it to will be the creator of the collection, which is, in this section, the module publisher.
 
-The rest of the fields necessary to call the mint function will be stored as `const` variables in the contract for simplicity. You could make these configurable on your own by adding them to the list of parameters sent into `initialize_collection` function below.
+For simplicity, we'll make hard-coded `const` variables to store default data for the rest of the fields necessary to call the mint function. You could make these configurable on your own by adding them to the list of parameters sent into `initialize_collection` function below.
 
 ### Writing a collection creation function
 
 First off, note the first couple lines of the `initialize_collection` function:
 
+This gates the ability to run this function to the owner of the contract. This isn't necessary, but unless you specifically design a contract around
+letting multiple accounts use it, it's simpler to only allow the account that deploys the contract to use it. This avoids a few potential vulnerabilities where you unintentionally allow an account to modify internal module resources for another account.
+
 ```rust
 let creator_addr = signer::address_of(creator);
 assert!(creator_addr == @mint_nft_v2_part1, error::permission_denied(ENOT_AUTHORIZED));
 ```
-This gates the ability to run this function to the owner of the contract. This isn't necessary, but unless you specifically design a contract around
-letting multiple accounts use it, it's simpler to only allow the account that deploys the contract to use it. This avoids a few potential vulnerabilities where you unintentionally allow an account to modify internal module resources for another account.
 
 Later on in part 3 of this tutorial, we'll remove this restriction by utilizing an admin model for module resources.
 
@@ -97,6 +105,9 @@ A `royalty_numerator` and `royalty_denominator` of 5 and 100 respectively would 
 
 The last step is to actually mint the NFT. Let's break down our mint function:
 
+The first thing to notice is that the `mint` function itself requires the creator of the collection to sign the transaction
+and a receiver address to send the minted NFT to.
+
 ```rust
 public entry fun mint(
     creator: &signer,
@@ -107,11 +118,9 @@ public entry fun mint(
 }
 ```
 
-The first thing to notice is that the `mint` function itself requires the creator of the collection to sign the transaction
-and a receiver address to send the minted NFT to.
-
-Note that we aren't requiring the receiver to approve of being sent an NFT, which isn't ideal. But requiring two signers is even more
-convoluted, so we'll change this in a later section.
+So there's a few issues with this function that we'll improve later:
+1. the creator has to sign, so you'd need to process off-chain asynchronous requests from a user to approve of a mint.
+2. the receiver doesn't have to sign. We do this for educational purposes, because requiring two signers is beyond the scope of this tutorial, and we haven't automated it so the creator doesn't have to sign yet
 
 Token objects are created by generating a hash from the account's sequentially increasing GUID. We get the next GUID number before minting and then use it after minting to get the token object's address:
 ```rust
@@ -134,7 +143,9 @@ aptos_token::mint(
 );
 ```
 
-The last 3 parameters are used to create a property map. Respectively, they are the property key, type, and value for the token property map. We pass in a field called `mint_timestamp` of type `u64` to display how to use it. The inner vector values are BCS serialized bytes that map to a key's corresponding `value` for the `key: value` structure of the map.
+The last 3 parameters are used to create a property map. Respectively, they are the property key, type, and value for the token property map. We pass in a field called `mint_timestamp` for the key name, `u64` to specify its type, and the last field is a BCS serialized byte vector that maps to a key's corresponding `value` for the `key: value` structure of the map.
+
+You could think of the property map as a map with one key. In pseudocode: `property_map['mint_timestamp']: u64 = now_seconds()`
 
 :::tip Advanced Info
 Property maps are unique polymorphic data structures that enable storing multiple data types into a mapped vector. You can read more about them in the [aptos-token-objects/property_map.move](https://github.com/aptos-labs/aptos-core/blob/main/aptos-move/framework/aptos-token-objects/sources/property_map.move) contract.
@@ -158,18 +169,14 @@ aptos init --profile default
 
 When prompted for the network, either leave it blank or write `devnet`. For the private key, you can hit enter on a blank entry to have the CLI create and fund a new account on devnet for you.
 
-Navigate your terminal to the `aptos-core/aptos-move/move-examples/mint_nft_v2_part1/1-Create-Nft` folder and publish the module, specifying
+Navigate your terminal to the `aptos-core/aptos-move/move-examples/mint_nft_v2_part1/1-Create-NFT` folder and publish the module, specifying
 to publish it with your `default` profile and then using its address as the contract deployment address.
 
-Devnet tokens are free, so we've included the `--assume-yes` flag that confirms you want to pay the gas fee for submitting the transaction.
-
 ```shell
-aptos move publish --named-addresses mint_nft_v2_part1=default --profile default --assume-yes
+aptos move publish --named-addresses mint_nft_v2_part1=default --profile default
 ```
 
-The contract is now deployed to your `default` profile account on `devnet`!
-
-In case you forget your default profile account address, you can use this command to view it:
+The contract is now deployed to your `default` profile account on `devnet`! In case you forget your default profile account address, you can use this command to view it:
 
 ```shell
 aptos account lookup-address --profile default
@@ -209,7 +216,9 @@ The globally addressable name of the function will look something like this:
 0x5b9a0410a054bc63889759d2069096c31a7a941597d4a177cd7de5dee15790d8::create_nft::initialize_collection
 ```
 
-Now let's call the `initialize_collection` function. Since we deployed the contract with the `default` profile, the CLI will let you substitute your profile name for an address.
+Since we deployed the contract with the `default` profile, the CLI will let you substitute your profile name for an address.
+ 
+Now let's call the `initialize_collection` function.
 
 ```shell
 aptos move run --function-id default::create_nft::initialize_collection   \
@@ -250,19 +259,55 @@ You should see a `0x4::collection::MintEvent` and a `0x1::object::TransferEvent`
 
 ## 2. Automating the mint function with a resource account
 
-The issue with the code we've written so far is that it requires explicit approval from the creator to mint a token. The process isn't automated and the receiver doesn't ever approve of receiving the token.
+There's two issues with the code we've written so far that we'll fix in part 2:
 
-The first step to improving the flow of this process is automating the creator's approval. We can do this with the use of what's called a resource account.
+1. The contract requires explicit approval from the creator to mint a token. Thus, the process isn't automated and in addition to that, the receiver doesn't necessarily ever approve of receiving the token.
+2. We don't have any way to mint multiple tokens, because the name doesn't change from the first mint to the second, meaning the unique token ids will clash and it'll fail.
 
-To achieve this, in this section we'll show you how to:
+To resolve these issues, in this section we'll show you how to:
 
 - Create the NFT collection with a resource account
-- Store the capability to sign things with the resource account, a `SignerCapability`, into the owner's resources on-chain
+- Store the capability to sign things with the resource account, a `SignerCapability`, into the contract's resources on-chain
 - Automate minting the token to the user; that is, write a mint function that works without the collection creator's signature
+- Automatically increment the token name based on the collection supply: `Krazy Kangaroo #1, Krazy Kangaroo #2, Krazy Kangaroo #3` etc
 
 ### What is a resource account?
 
-A resource account is an account that's used to store and manage resources. When you create a resource account, you can choose to manage its resources through a `SignerCapability`:
+A resource account is an account that's used to store and manage resources. Upon creation, a resource account is designated an auth key for a different account. This auth key specifies which account can manage its resources. If you make a resource account and don't specify an auth key directly, the account you use to create it will be used as the designated auth key, meaning it has the ability to manage the resource account's resources.
+
+There is also a unique function you can call to rotate the auth key to `0x0`, giving the Move runtime engine the ability to generate the resource account's signer with a `SignerCapability` resource.
+
+You can create a resource account in a move contract by specifying a seed and calling it with the owning account's signer. The resulting resource account address is derived from a SHA3-256 hash of the owner's account + the seed.
+
+To actually store this SignerCapability and use it later, the process typically looks something like this:
+
+```rust
+// define a resource we can store the SignerCapability in in our contract:
+struct MySignerCapability has key {
+    resource_signer_cap: SignerCapability,
+}
+
+public entry fun store_signer_capability(creator: &signer) {
+    // We can store `MySignerCapability` to an account, because it has the ability `key`. We can even store it on the resource account itself:
+    let (resource_signer, resource_signer_cap) = account::create_resource_account(creator, b"seed bytes");
+    move_to(resource_signer, MySignerCapability {
+        resource_signer_cap,
+    });
+}
+
+public entry fun sign_with_resource_account(creator: &signer) acquires MySignerCapability {
+    let resource_address = account::create_resource_address(signer::address_of(creator), b"seed bytes");
+    let signer_cap = borrow_global<MySignerCapability>(resource_account_address);
+    let resource_signer = account::create_signer_with_capability(signer_cap);
+
+    // here we'd do something with the resource_signer that we can only do with its `signer`, like call the mint function!
+}
+```
+Utilizing a resource account in this way is the fundamental process for automating the generation and retrieval of resources on-chain.
+
+You might be wondering "*Why does this work? Isn't it dangerous to be able to create a signer for an account so easily?*"
+
+Yes, you need to make sure you're gating access to the `SignerCapability`, but it's designed in such a way that if you have access to it, you either created it, or you were given it by someone who very intentionally gave it to you.
 
 ```rust
 struct SignerCapability has drop, store {
@@ -270,89 +315,103 @@ struct SignerCapability has drop, store {
 }
 ```
 
-Since the `SignerCapability` is stored on-chain as a resource, you can programmatically retrieve it to manage resources located at the address in the `account` field.
+:::tip
+To intuitively understand why a `SignerCapability` is allowed to be so powerful, you need to consider how resource storage and control work in Move. You can't directly access, create, or modify a resource outside of the module it's defined in, meaning if you have access to a resource in some way, the creator of the module it belongs to explicitly gave it to you.
 
-In our case, we create the collection with the resource account upon initialization. When a user requests to mint later on, we retrieve the `SignerCapability` and use it to generate the signer for the `mint(creator: &signer, ...)` function. 
+The `account` address contained within specifies the address the `SignerCapability` can generate a signer for. As defined in `account.move`, there is no way to change this field once it's set upon creation, so the owner of a `SignerCapability` can never change which resource account it controls. There is no `copy` ability on the struct, either, meaning there can only be a single `SignerCapability` in existence for each resource account.
 
-This is what facilitates the autonomous nature of the contract- since the creator is now the resource account, we can program it to approve of a request to mint programmatically!
+Upon creating the `SignerCapability`, you're free to decide how you want to expose it. You can store it somewhere, give it away, or gate its access to functions that use it or conditionally return it.
+:::
 
 You can view the resource account functionality in more detail at [account.move](https://github.com/aptos-labs/aptos-core/blob/main/aptos-move/framework/aptos-framework/sources/account.move) and [resource_account.move](https://github.com/aptos-labs/aptos-core/blob/main/aptos-move/framework/aptos-framework/sources/resource_account.move).
 
 ### Adding a resource account to our contract
 
+We need to create a resource account and use it to automate the minting function. We can create the collection with the resource account upon initialization, store its `SignerCapability` and then, when a user requests to mint later on, we retrieve it and use it to generate the signer for the `mint(creator: &signer, ...)` function. 
+
+This is what facilitates the autonomous nature of the contract- since the creator is now the resource account, we can program it to conditionally approve of a request to mint!
+
 Most of the code for our contract in this second part is very similar, so we're only going to discuss the parts added that make it different.
 
 :::note
-Please note that in this contract, the resource account will now technically be the `creator` of the collection, so for clarity we've changed the account representing the deployer (you) to be named `owner` and the account that creates the collection and mints tokens to remain `creator.`
+Note that in this new contract, the resource account will now technically be the `creator` of the collection, so for clarity we've changed the account representing the deployer (you) to be named `owner` and the account that creates the collection and mints tokens to remain `creator.`
 :::
 
-Let's start by adding the `SignerCapability` to our contract. We'll store it in our `MintConfiguration`:
+Let's start by adding the `SignerCapability` to our contract. We'll store it in our `MintConfiguration`. We've also changed the `token_name` field to `base_token_name` so we can auto-increment the name with a base, such as `Krazy Kangaroo`, as opposed to the full `Krazy Kangaroo #1`:
 
 ```rust
 struct MintConfiguration has key {
     signer_capability: SignerCapability,
     collection_name: String,
-    token_name: String,
+    base_token_name: String,
     token_uri: String,
 }
 ```
 
-We create it, providing it a seed in the form of the collection name.
+There is a CLI command `aptos move publish create-resource-account-and-publish-package` that we're going to use to publish our code to a resource account. When you call this command, it doesn't call `create_resource_account`. It calls a slightly different function under the hood:
 
 ```rust
-let seed = *string::bytes(&collection_name);
-let (resource_signer, resource_signer_cap) = account::create_resource_account(owner, seed);
+account::create_resource_account_and_publish_package(
+    origin: &signer,
+    seed: vector<u8>,
+    metadata_serialized: vector<u8>,
+    code: vector<vector<u8>>,
+);
 ```
 
-:::info
-The seed can be anything we want, but since resource accounts are unique hashes of the combination of the creating account + seed, it's good to make the seed something that will also be unique. In our case, the owner and collection name combination will always be unique because that is a constraint enforced by the `collection.move` contract, so the seed being the collection name logically follows.
+This creates a resource account and publishes the module to that resource account's address.
+
+:::warning
+If you do not add a function to retrieve the resource signer to your contract the *first* time you publish it, it will inadvertently be an immutable contract. You will never be able to change it, because there is no way to acquire the SignerCapability stored inside the module and use it freely, which is the only way you can update the contract since the resource signer is the owner.
 :::
 
-To clarify, the `resource_signer` is the actual structure on chain that signs things, it is of type `signer`; whereas the `SignerCapability` is a unique
-on-chain resource that generates a signer for an account, given whomever requesting it has permission to access the `SignerCapability` resource.
+The only way to retrieve the signer cap down the road is if we store it upon initialization, so we need to use a unique module function called `init_module(resource_signer: &signer) { ... }` that is only run upon the first publication of the module. The `resource_signer` is the signer for the resource account passed into the function. We can use it to store the `MintConfiguration` resource at the resource address upon initialization:
+
+```rust
+fun init_module(resource_signer: &signer) {
+    let resource_signer_cap = resource_account::retrieve_resource_account_cap(resource_signer, @owner);
+    move_to(resource_signer, MintConfiguration {
+        signer_capability: resource_signer_cap,
+        collection_name: string::utf8(b""),
+        base_token_name: string::utf8(b""),
+        token_uri: string::utf8(b""),
+    });
+}
+```
+
+Note that `@owner` is specified later, it's going to be our `default` profile account address. We also leave the other fields as empty strings, because we're only using it to store the signer capability upon the module initialization.
+
+:::info
+To reiterate, a `signer` is the representation of an account's signature on chain. It represents the permission to manage an account's resources and sign things. A `SignerCapability` is a resource used to generate a `signer` for the resource account located at the address in its `account` field.
+:::
 
 Now we can provide the `resource_signer` as the creator of the collection, and move the `resource_signer_cap` to the `MintConfiguration`, so we can programmatically retrieve the creator's ability to sign later.
 
-Note also that we store the `MintConfiguration` resource onto the resource account now, so when you call `create_collection` you'll have to look up the resource account's address to call the mint function later.
-
 ```rust
-aptos_token::create_collection(
-    &resource_signer,
+public entry fun initialize_collection(...) {
     // ...
-);
+    aptos_token::create_collection(
+        &resource_signer,
+        // ...
+    );
 
-move_to(&resource_signer, MintConfiguration {
-    signer_capability: resource_signer_cap,
-    collection_name,
-    token_name,
-    token_uri,
-});
+    let mint_configuration = borrow_global_mut<MintConfiguration>(@mint_nft_v2_part2);
+    mint_configuration.collection_name = collection_name;
+    mint_configuration.base_token_name = base_token_name;
+    mint_configuration.token_uri = token_uri;
+}
 ```
-
 Let's alter the mint function so that it uses the resource account instead of the owner account.
 
 The first thing to notice is that the arguments to the function have changed. We no longer need the owner or the creator to sign the transaction. To do this before, we would've had to implement a function that takes two signers, which would've been complex. Not requiring the signer, however, meant the receiver had no say in whether or not they even wanted to receive the NFT.
 
-Now, we can require the receiver to sign so that a user can mint whenever they like, and the owner doesn't have to approve of it beforehand.
+Now, we don't need the owner to sign because the the resource account will do it within the `mint` function. This means we can enforce that the receiver signs a request to mint, but still only use one signer.
 
 ```rust
-public entry fun mint(receiver: &signer, resource_addr: address) acquires MintConfiguration {
+public entry fun mint(receiver: &signer) acquires MintConfiguration {
     //...
 }
 ```
-
-Note that we require the user to pass in the resource address- we've provided a view function as one way for you to calculate it. We show you how to use this function later in the [Running the contract section](#running-the-contract-1).
-
-```rust
-#[view]
-public fun get_resource_address(collection_name: String): address {
-    account::create_resource_address(&@mint_nft_v2_part2, *string::bytes(&collection_name))
-}
-```
-
-:::tip Advanced Tip
-Computing the `resource_addr` inside the `mint` function with `account::create_resource_address(...)` has heavy computational overhead because it uses a cryptographic hashing function. In some instances where we only call the `mint` function a few times, this might be okay, but since a `mint` function is intended to be called by potentially thousands of users in a very short period of time, we ensure that it has been precomputed and have the user pass it in as an argument.
-:::
 
 Next, we access the mint configuration data to retrieve the signer capability. We generate a temporary signer with `account::create_signer_with_capability` and use it to sign the mint function and transfer the token object to the receiver.
 
@@ -363,24 +422,56 @@ public entry fun mint(receiver: &signer) acquires MintConfiguration {
     let signer_cap = &mint_configuration.signer_capability;
     let resource_signer: &signer = &account::create_signer_with_capability(signer_cap);
     // ...
+    let token_name = next_token_name_from_supply(
+        resource_signer,
+        mint_configuration.base_token_name,
+        mint_configuration.collection_name,
+    );
+
+    // ...
     // ... similar code as part 1
-    // ... just replace `creator` and `creator_addr` with `resource_signer` and `resource_addr`
+    // ... just replace `creator` and `creator_addr` with `resource_signer` and `resource_addr`, respectively
     // ...
 }
 ```
-:::warning
-Be careful about how you generate and retrieve signers from a `SignerCapability` resource. It is, in essence, the keys to a resource account. If you purposely or inadvertently let any account access a `SignerCapability` freely, they can do almost anything they want with the resources in the associated account.
 
-In our case, our code essentially makes the mint free, because there is no cost to mint and anyone can do it as many times as they like. This could be
-intentional in some cases, but should be considered before hand. Always be highly aware of how you grant access to a resource account's signer capability.
-:::
+Let's look at the code for how the `token_name` is generated to understand how we're auto-incrementing the name:
+
+```rust
+/// generates the next token name by concatenating the supply onto the base token name
+fun next_token_name_from_supply(
+    creator: &signer,
+    base_token_name: String,
+    collection_name: String,
+): String {
+    let collection_addr = collection::create_collection_address(&signer::address_of(creator), &collection_name);
+    let collection_object = object::address_to_object<Collection>(collection_addr);
+    let current_supply = option::borrow(&collection::count(collection_object));
+    let format_string = base_token_name;
+    // if base_token_name == Token Name
+    string::append_utf8(&mut format_string, b" #{}");
+    // 'Token Name #1' when supply == 0
+    string_utils::format1(string::bytes(&format_string), *current_supply + 1)
+}
+```
+
+It's quite simple what we're doing- we've made an internal function that queries from `collection.move` the collection's supply. It's an `option` value, so we `borrow` the element inside, dereference it, and then add 1 to it to get the collection's current supply + 1.
+
+We append a ` #` to the token base name, and then use the `string_utils` contract to format a string with interpolation similar to how you would in most other languages. Post append, it'd look like this:
+
+```rust
+string_utils::format1("Krazy Kangaroo #{}", *current_supply + 1)
+```
+
+We return this value and call it in our mint function to set our token name!
+
 
 ### Publishing the module and running the contract
 
 Publishing the module is basically the same as before. Just make sure you're in the `2-Using-Resource-Account` directory and run this command, note the only thing that changed is the module name in the first line, `create_nft_with_resource_account` instead of `create_nft`:
 
 ```shell
-aptos move publish --named-addresses mint_nft_v2_part2=default --profile default --assume-yes
+aptos move publish --named-addresses mint_nft_v2_part2=default --profile default
 ```
 
 Call this function as the owner of the contract, which is our `default` profile. Keep in mind the `--profile default` flag:
@@ -562,7 +653,7 @@ A Table offers very efficient lookup times. Since it's a hashing function, it's 
 Navigate to the `3-Adding-Admin-and-Whitelist` directory and publish the module for part 3:
 
 ```shell
-aptos move publish --named-addresses mint_nft_v2_part3=default --profile default --assume-yes
+aptos move publish --named-addresses mint_nft_v2_part3=default --profile default
 ```
 
 Initialize the collection:
@@ -923,5 +1014,5 @@ aptos move run --function-id default::create_nft_with_public_phase_and_events::s
 ```
 
 ```shell
-aptos move publish --named-addresses mint_nft_v2_part1=default --profile default --assume-yes
+aptos move publish --named-addresses mint_nft_v2_part1=default --profile default
 ```
