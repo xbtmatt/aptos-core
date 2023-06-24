@@ -1,0 +1,11 @@
+[package]
+name = "Dynamic Toads with zTraits"
+version = "0.0.0"
+
+[addresses]
+token_objects = "0x4"
+ztraits = "_"
+
+[dependencies]
+AptosFramework = { local = "../framework/aptos-framework" }
+AptosTokenObjects = { local = "../framework/aptos-token-objects" }
