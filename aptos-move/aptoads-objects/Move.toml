@@ -1,0 +1,11 @@
+[package]
+name = "Dynamic Toads"
+version = "0.0.0"
+
+[addresses]
+token_objects = "0x4"
+aptoads_objects = "_"
+
+[dependencies]
+AptosFramework = { local = "../framework/aptos-framework" }
+AptosTokenObjects = { local = "../framework/aptos-token-objects" }

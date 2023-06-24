@@ -1,0 +1,14 @@
+{
+  "function_id": "0x527b0716834c96aea9f4e2ec8ef9873bdcc83f4268b59906a5cc243dbee6180c::dynamic_toads::change_uri",
+  "type_args": [],
+  "args": [
+    {
+      "type": "address",
+      "value": "0x16e62724710497d4685e9c5171ff1ff48198dd976ff0044119a00c4fcc0e9bf4"
+    },
+    {
+		 "type": "string",
+		 "value": "https://wxgpcmjwyc2jfm2aj2lsu2mu5lkxmug443eodv6l23ej6pwhg7cq.arweave.net/tczxMTbAtJKzQE6XKmmU6tV2UNzmyOHXy9bInz7HN8U"
+		}
+	]
+}
