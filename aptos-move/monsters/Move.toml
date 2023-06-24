@@ -1,0 +1,10 @@
+[package]
+name = "Monsters"
+version = "0.0.0"
+
+[addresses]
+token_objects = "0x4"
+
+[dependencies]
+AptosFramework = { local = "../framework/aptos-framework" }
+AptosTokenObjects = { local = "../framework/aptos-token-objects" }
