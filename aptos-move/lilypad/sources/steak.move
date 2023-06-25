@@ -557,7 +557,7 @@ module pond::steak {
 ///////////////////////////////////////                                  ////////////////////////////////////////
 
    #[test_only]
-	use pond::bash_colors::{Self, color, color_bg, bcolor, bcolor_bg, u64_to_string, bool_to_string, bool_to_string_bytes, print_key_value, print_key_value_as_string};
+	use pond::bash_colors::{Self, color, color_bg, bcolor, bcolor_bg, u64_to_string, bool_to_string_as_string, bool_to_string, print_key_value, print_key_value_as_string};
 
 	#[test_only]
 	use std::string::{utf8};
@@ -577,8 +577,8 @@ module pond::steak {
 		let _ = bcolor_bg(b"blue", use_bytes);
 		print_key_value(b"key", b"value");
 		print_key_value_as_string(b"int", u64_to_string(1));
-		print_key_value(b"bool", bool_to_string_bytes(true));
-		print_key_value_as_string(b"bool", bool_to_string(true));
+		print_key_value(b"bool", bool_to_string(true));
+		print_key_value_as_string(b"bool", bool_to_string_as_string(true));
 	}
 
 	#[test_only]

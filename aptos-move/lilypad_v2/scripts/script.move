@@ -860,7 +860,7 @@ script {
 
 
 			//pond::bash_colors::print_key_value_as_string(b"token name", token_name);
-			//pond::bash_colors::print_key_value(*std::string::bytes(&token_name), pond::bash_colors::bool_to_string(burnable));
+			//pond::bash_colors::print_key_value(*std::string::bytes(&token_name), pond::bash_colors::bool_to_string_as_string(burnable));
 		}
 		*/
 

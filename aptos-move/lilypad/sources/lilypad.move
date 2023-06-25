@@ -1967,8 +1967,8 @@ module pond::lilypad {
 		pond::bash_colors::print_key_value_as_string(b"time_now_ms: ", pond::bash_colors::u64_to_string(time_now_ms));
 		pond::bash_colors::print_key_value_as_string(b"launch_time: ", pond::bash_colors::u64_to_string(launch_time));
 		pond::bash_colors::print_key_value_as_string(b"end_time: ", pond::bash_colors::u64_to_string(end_time));
-		pond::bash_colors::print_key_value(b"time_now_ms >= launch_time: ", pond::bash_colors::bool_to_string_bytes(time_now_ms >= launch_time));
-		pond::bash_colors::print_key_value(b"time_now_ms <= end_time: ", pond::bash_colors::bool_to_string_bytes(time_now_ms <= end_time));
+		pond::bash_colors::print_key_value(b"time_now_ms >= launch_time: ", pond::bash_colors::bool_to_string(time_now_ms >= launch_time));
+		pond::bash_colors::print_key_value(b"time_now_ms <= end_time: ", pond::bash_colors::bool_to_string(time_now_ms <= end_time));
 
 		//assert!(time_now_ms >= launch_time, NOT_YET_CLAIMS_TIME);
 		//assert!(time_now_ms <= end_time, CLAIM_EVENT_COMPLETE);

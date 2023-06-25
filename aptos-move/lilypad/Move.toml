@@ -7,17 +7,21 @@ std = "0x1"
 aptos_std = "0x1"
 aptos_framework = "0x1"
 aptos_token = "0x3"
+token_v2 = "0x4"
 pond = "0x1f03a48de7dc0a076d275ebdeb0d80289b5a84a076dbf44fab69f38946de4115"
 vip1 = "0xe2ac8bab692fc3d705297d9ef45c2f15aa30851dcc65fb9c03d0e38b7220a2c3"
 vip2 = "0x4d700aa3e72a84d2458ad2522a3f7be4d99dcc5fa2c22c43fbcd9217e5e7668a"
 vip3 = "0x790bc9aa92d6e54fccc7ebd699386b0d526dad9686971ff1720dac513c5ba4dc"
 
+resource_creator_addr = "0x74b6b765f6710a0c24888643babfe337241ad1888a55e33ed86f389fe3f13f52"
+
 pond_testnet = "0x11637e8328263828fc96583fbdb4f263a0141d66a740f6a36017f685e71dd5ba"
 pond_old = "0x1f03a48de7dc0a076d275ebdeb0d80289b5a84a076dbf44fab69f38946de4115"
-
+me = "0xffc117086980d34dc3b5a42cb407ed888f60623f46021f35c2ca522ea13cc961"
 
 [dependencies]
 MoveStdlib = { local = "../framework/move-stdlib" }
 AptosFramework = { local = "../framework/aptos-framework" }
 AptosToken = { local = "../framework/aptos-token" }
+AptosTokenObjects = { local = "../framework/aptos-token-objects" }
 DataStructure = { local = "../move-examples/data_structures" }

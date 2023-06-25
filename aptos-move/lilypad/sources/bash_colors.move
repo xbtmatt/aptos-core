@@ -119,6 +119,8 @@ module pond::bash_colors {
 	}
 */
 
+	public fun hex_to_u64() { }
+
 	// const MAX_U64: u64 = 18446744073709551615;
 	public fun u64_to_string(n: u64): String {
 		if (n == 0) { utf8(b"0") }
@@ -219,7 +221,7 @@ module pond::bash_colors {
 	}
 
 
-	public fun bool_to_string_bytes(b: bool): vector<u8> {
+	public fun bool_to_string(b: bool): vector<u8> {
 		if (b) {
 			b"true"
 		} else {
@@ -227,8 +229,8 @@ module pond::bash_colors {
 		}
 	}
 
-	public fun bool_to_string(b: bool): String {
-		std::string::utf8(bool_to_string_bytes(b))
+	public fun bool_to_string_as_string(b: bool): String {
+		std::string::utf8(bool_to_string(b))
 	}
 
 	public fun print_key_value(k: vector<u8>, v: vector<u8>) {
