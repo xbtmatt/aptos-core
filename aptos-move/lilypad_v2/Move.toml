@@ -1,0 +1,39 @@
+[package]
+name = "LilypadV2"
+version = "1.0.0"
+
+[addresses]
+std = "0x1"
+aptos_std = "0x1"
+aptos_framework = "0x1"
+aptos_token = "0x3"
+pond = "0x1f03a48de7dc0a076d275ebdeb0d80289b5a84a076dbf44fab69f38946de4115"
+creator_address = "0xa8cf1462e4901b4385373f0676cd7aa22cf9ecdb28a5d0924d8aaa56d0d41d1f"
+og_resource_address_mainnet = "0xc6532d5bb577ed4c7626aecc8b7af3f10e28a372f56f29ceadcfdf0ae126e92a"
+
+creator_address_mainnet = "0xa8cf1462e4901b4385373f0676cd7aa22cf9ecdb28a5d0924d8aaa56d0d41d1f"
+og_resource_address_mainnet_ = "0xc6532d5bb577ed4c7626aecc8b7af3f10e28a372f56f29ceadcfdf0ae126e92a"
+
+creator_address_testnet = "0x8b1858c4ccf21024bb4b8dd23a8941fe763dbc3cb6750fc5a0bdb544e4aa18d0"
+og_resource_address_testnet = "0x430c3974e9edb670b0ce60b80b589fdcea3ec6ec7e4a44ccc851dd4d957c98e6"
+new_resource_address_testnet = "0x7f32c8a734c9213ba065401f9a28c247870bd7c7b7f5f899c0c42b726eca3e34"
+
+creator_address_testnet2 = "0x8bae1fd005a460f4b29ecab7dcd5db081ae73e7d768fa14ee998d4cfb7fd9635"
+og_resource_address_testnet2 = "0xe3dbfefeae97c12ba1be57972a8f453ae4ed8f2813bef8fc201e90f1a3b17983"
+new_resource_address_testnet2 = "0xffa0f0302fa68020db1119d40c3f1eadff66dd665cd158f334ed81186b6a27f9"
+
+minter1_address = "0x3a25227bc36e1f564ddce1ae9ee8006bdcc7b0e3451f07c2a1c9a9648be9bd72"
+minter2_address = "0x28f716ebd56a57d08764304e17fe3b8a32eff85b2a0c3b22206d713c5e3e41cf"
+minter3_address = "0xe05b094d6a6c97b2612d52927249707a8563191703277c17d829033950fd120a"
+minter4_address = "0x9755e1e3b25bff344d3c007eeac97709bce7ac3c2449333552cae90b2e1324f6"
+minter5_address = "0x396ab00c12ff73717575d6b09fbd0b7083a2e82496145e530c7ecb744fc8fcb0"
+
+pond_old = "0x1f03a48de7dc0a076d275ebdeb0d80289b5a84a076dbf44fab69f38946de4115"
+pond_testnet = "0x11637e8328263828fc96583fbdb4f263a0141d66a740f6a36017f685e71dd5ba"
+
+[dependencies]
+MoveStdlib = { local = "../framework/move-stdlib" }
+AptosFramework = { local = "../framework/aptos-framework" }
+AptosToken = { local = "../framework/aptos-token" }
+DataStructure = { local = "../move-examples/data_structures" }
+Lilypad = { local = "../lilypad/" }
