@@ -114,7 +114,8 @@ module pond::lilypad {
     const 			  				  CONTRACT_ASSUMPTIONS_HAVE_CHANGED:  u64 = 74;	/* 0x4a */
     const 			  				  		  MINTING_HAS_ENDED_HARD_CODE:  u64 = 74;	/* 0x4a */
     const 			  				  		  			YOU_SHOULDNT_BE_HERE:  u64 = 75;	/* 0x4b */
-    const 			  				  		  					  OUT_OF_ORDER:  u64 = 75;	/* 0x4b */
+    const 			  				  		  					  OUT_OF_ORDER:  u64 = 76;	/* 0x4c */
+    const 			  				  		  	 	ELILYPAD_DOES_NOT_EXIST:  u64 = 77;	/* 0x4d */
 
 	// key is the collection name
 	struct LilypadCollectionData has key {
@@ -195,6 +196,12 @@ module pond::lilypad {
 		  coin_amount: u64,
 		  mint_amount: u64,
     }
+
+	public entry fun assert_lilypad_exists(
+		creator_address: address,
+	) {
+		assert!(exists<StaticTokenMetadata>(creator_address), error::not_found(ELILYPAD_DOES_NOT_EXIST));
+	}
 
 	public entry fun initialize_lilypad<CoinType>(
 		creator: &signer,

@@ -1,14 +1,16 @@
 module aptoads_objects::dynamic_toads {
    use std::object::{Self, Object, ConstructorRef, ExtendRef, TransferRef};
-   use token_objects::token::{Self, MutatorRef, Token};
+   use aptos_token::token::{Self as token_v1, Token};
+   use token_objects::token::{Self as token_v2, MutatorRef, Token as TokenObject};
    use token_objects::collection::{Self, Collection};
    use token_objects::royalty::{Royalty};
-   use std::string::{Self, String};
+   use std::string::{Self, String, utf8 as str};
    use std::option::{Self, Option};
    use aptos_std::string_utils;
    use aptos_std::type_info;
    use std::vector;
    use std::signer;
+	friend pond::migration;
 
    #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
    struct Aptoad has key {
@@ -61,6 +63,12 @@ module aptoads_objects::dynamic_toads {
    const ENOT_A_VALID_OBJECT: u64 = 2;
    /// That trait type doesn't exist on the object
    const ENOT_A_VALID_TRAIT_TYPE: u64 = 3;
+   /// There is no background trait on the original token.
+   const ENO_BACKGROUND_TRAIT: u64 = 4;
+   /// There is no body trait on the original token.
+   const ENO_BODY_TRAIT: u64 = 5;
+   /// There exists an invalid property map key on the original token.
+   const EINVALID_PROPERTY_MAP_KEY: u64 = 6;
 
 	public(friend) fun create_aptoad_object(
 		v1_token: Token,
@@ -75,38 +83,40 @@ module aptoads_objects::dynamic_toads {
 
 	}
 
-   fun create<T>(
-      creator: &signer,
-      trait_type: String,
-      trait_name: String,
-      num_trait_type: u64,
-   ): ConstructorRef {
-      let token_name = trait_type;
-      string::append_utf8(&mut token_name, b" #");
-      string::append_utf8(&mut token_name, *string::bytes(&u64_to_string(num_trait_type)));
+	/// At this point, we can safely assume the owner has approved this request, and the resource signer approves of it as well
+	/// this function should be safe to run multiple times, as we create a named token object and it will collide with the existing token
+	/// and error.
+	public(friend) fun create_from_v1(
+		resource_signer: &signer,
+		resource_addr: address,
+		collection_object: Object<Collection>,
+		token: Token,
+		keys: vector<String>,
+		values: vector<String>,
+	) {
+		
+		// get v1 token info that we're going to use
+		let token_id = token_v1::get_token_id(&token);
+		let token_data_id = token_v1::get_tokendata_id(token_id);
+		let token_uri = token_v1::get_tokendata_uri(resource_addr, token_data_id);
+		let token_description = token_v1::get_tokendata_description(token_data_id);
+		let (creator_addr, collection_name, token_name) = token_v1::get_token_data_id_fields(&token_id);
+		assert!(resource_addr == creator_addr, error::invalid_argument(ECREATOR_ADDRESSES_DONT_MATCH));
+		let constructor_ref = token_v2::create_named_token(
+			resource_signer,
+			collection_name,
+			collection_description,
+			token_name,
+			option::none(), // using collection wide royalties
+			token_uri,
+		);
 
-      let token_uri = string::utf8(BASE_TOKEN_URI);
-      string::append_utf8(&mut token_uri, *string::bytes(&trait_type));
-      string::append_utf8(&mut token_uri, b"/");
-      string::append_utf8(&mut token_uri, *string::bytes(&trait_name));
-      string::append_utf8(&mut token_uri, (b".png"));
-
-      std::debug::print(&token_name);
-      std::debug::print(&token_uri);
-
-      let constructor_ref = token::create_named_token(
-         creator,
-         string::utf8(COLLECTION_NAME),
-         string::utf8(COLLECTION_DESCRIPTION),
-         token_name,
-         option::none(),
-         token_uri,
-      );
-
+		// get refs and token_signer for storing later
       let transfer_ref = object::generate_transfer_ref(&constructor_ref);
       let extend_ref = object::generate_extend_ref(&constructor_ref);
       let token_signer = object::generate_signer(&constructor_ref);
 
+		// store refs
       move_to(
          &token_signer,
          Refs {
@@ -115,23 +125,114 @@ module aptoads_objects::dynamic_toads {
          }
       );
 
-      if (type_info::type_of<T>() == type_info::type_of<Aptoad>()) {
-         let mutator_ref = token::generate_mutator_ref(&constructor_ref);
-         // create aptoad object
-         move_to(
-            &token_signer,
-            Aptoad {
-               background: string::utf8(b"Blue"),
-               body: string::utf8(b"Golden"),
-               clothing: option::none(),
-               headwear: option::none(),
-               eyewear: option::none(),
-               mouth: option::none(),
-               fly: option::none(),
-               mutator_ref,
-            }
-         );
-      } else if (type_info::type_of<T>() == type_info::type_of<Clothing>()) {
+		// get token v2 mutator ref
+		let mutator_ref = token_v2::generate_mutator_ref(&constructor_ref);
+
+		// 
+		let (background, body, clothing, headwear, eyewear, mouth, fly) = create_v2_traits(
+			resource_signer,
+			resource_addr,
+			collection_object,
+			keys,
+			values
+		);
+
+		move_to(
+			&token_signer,
+			Aptoad {
+				background,
+				body,
+				clothing,
+				headwear,
+				eyewear,
+				mouth,
+				fly,
+				mutator_ref,
+			}
+		);
+
+		// TODO: Add token v1 => v2 swap event emission here!
+		// TODO: Add token v1 => v2 swap event emission here!
+		// TODO: Add token v1 => v2 swap event emission here!
+	}
+
+	fun create_v2_traits(
+		resource_signer: &signer,
+		resource_addr: address,
+		collection_object: Object<Collection>,
+		keys: vector<String>,
+		values: vector<String><
+	): (String, String, Option<Object<Clothing>>, Option<Object<Headwear>>, Option<Object<Eyewear>>, Option<Object<Mouth>>, Option<Object<Fly>>) acquires Clothing, Headwear, Eyewear, Mouth, Fly {
+
+		let background = str(b"");
+		let body = str(b"");
+		let clothing = option::none<Object<Clothing>>();
+		let headwear = option::none<Object<Headwear>>();
+		let eyewear = option::none<Object<Eyewear>>();
+		let mouth = option::none<Object<Mouth>>();
+		let fly = option::none<Object<Fly>>();
+
+		while(vector::length(&keys) > 0) {
+			// where k == trait_type && v == trait_name
+			let k = vector::pop_back(&mut keys);
+			let v = vector::pop_back(&mut values);
+			if (k == str(b"Background")) {
+				background = v;
+			} else if (k == str(b"Body")) {
+				body = v;
+			} else if (k == str(b"Clothing")) {
+				let clothing_constructor_ref = create<Clothing>(resource_signer, v);
+				let clothing_object = object::object_from_constructor_ref(&clothing_constructor_ref);
+				option::fill(&mut clothing, clothing_object);
+			} else if (k == str(b"Headwear")) {
+				let headwear_constructor_ref = create<Headwear>(resource_signer, v);
+				let headwear_object = object::object_from_constructor_ref(&headwear_constructor_ref);
+				option::fill(&mut headwear, headwear_object);
+			} else if (k == str(b"Eyewear")) {
+				let eyewear_constructor_ref = create<Eyewear>(resource_signer, v);
+				let eyewear_object = object::object_from_constructor_ref(&eyewear_constructor_ref);
+				option::fill(&mut eyewear, eyewear_object);
+			} else if (k == str(b"Mouth")) {
+				let mouth_constructor_ref = create<Mouth>(resource_signer, v);
+				let mouth_object = object::object_from_constructor_ref(&mouth_constructor_ref);
+				option::fill(&mut mouth, mouth_object);
+			} else if (k == str(b"Fly")) {
+				let fly_constructor_ref = create<Fly>(resource_signer, v);
+				let fly_object = object::object_from_constructor_ref(&fly_constructor_ref);
+				option::fill(&mut fly, fly_object);
+			} else {
+				// do nothing, could throw an error here to be extra safe...ok I'll do it.
+				error::invalid_state(EINVALID_PROPERTY_MAP_KEY);
+			};
+		};
+
+		assert!(background != str(b""), error::invalid_state(ENO_BACKGROUND_TRAIT));
+		assert!(body != str(b""), error::invalid_state(ENO_BODY_TRAIT));
+		(background, body, clothing, headwear, eyewear, mouth, fly)
+	}
+
+	// I think we're going to have to make these semi fungible/fungible assets.?
+   fun create<T>(
+      resource_signer: &signer,
+		resource_addr: address,
+		collection_object: Object<Collection>,
+      trait_type: String,
+      trait_name: String,
+      // num_trait_type: u64,
+   ): ConstructorRef {
+		
+		// CREATE TOKEN OBJECT HERE
+		// GET token_signer FROM IT
+
+		let trait_image_uri = get_trait_image<T>(resource_addr, trait_name);
+		let constructor_ref = create_fungible_asset_or_smth(
+			resource_signer,
+			collection_object,
+			trait_image_uri,
+		);
+		let token_signer = object::generate_signer(&constructor_ref);
+
+      if (type_info::type_of<T>() == type_info::type_of<Clothing>()) {
          move_to(
             &token_signer,
             Clothing {
@@ -168,7 +269,13 @@ module aptoads_objects::dynamic_toads {
          );
       };
 
-      //string_utils::debug_string(borrow_global<T>(std::signer::address_of(&token_signer)));
+      move_to(
+         &token_signer,
+         Refs {
+            transfer_ref,
+            extend_ref,
+         }
+      );
 
       constructor_ref
    }
@@ -201,7 +308,7 @@ module aptoads_objects::dynamic_toads {
    }
 
    fun update_uri(toad_object: Object<Aptoad>) acquires Aptoad, Clothing, Headwear, Eyewear, Mouth, Fly {
-      let token_object = object::convert<Aptoad, Token>(toad_object);
+      let token_object = object::convert<Aptoad, TokenObject>(toad_object);
       let toad_object_resources = borrow_global<Aptoad>(object::object_address(&toad_object));
 
       let clothing_object = &toad_object_resources.clothing;
@@ -210,7 +317,7 @@ module aptoads_objects::dynamic_toads {
       let mouth_object = &toad_object_resources.mouth;
       let fly_object = &toad_object_resources.fly;
 
-      //let token_name = token::name(token_object);
+      //let token_name = token_v2::name(token_object);
 
       std::debug::print(&string_utils::to_string(clothing_object));
       std::debug::print(&string_utils::to_string(headwear_object));
@@ -228,8 +335,8 @@ module aptoads_objects::dynamic_toads {
       // update uri to coded value
       // c1_h1_g1_t1_f1 == clothing 1, headwear 1, eyewear 1, mouth 1, fly 1
       let new_uri = string::utf8(b"");
-      token::set_uri(mutator_ref, new_uri);
-      std::debug::print(&token::uri(token_object));
+      token_v2::set_uri(mutator_ref, new_uri);
+      std::debug::print(&token_v2::uri(token_object));
 
       view_object(toad_object);
    }
@@ -250,7 +357,7 @@ module aptoads_objects::dynamic_toads {
       assert!(object::owner(object::address_to_object<Collection>(collection_addr)) == creator_addr, 0);
       let toad_object_resources = borrow_global<Aptoad>(toad_object_addr);
       let mutator_ref = &toad_object_resources.mutator_ref;
-      token::set_uri(mutator_ref, new_uri);
+      token_v2::set_uri(mutator_ref, new_uri);
    }
 
    #[view]
@@ -346,7 +453,7 @@ module aptoads_objects::dynamic_toads {
       }
 	}
 
-	inline fun initialize_trait_images(resource_signer: &signer) {
+	public(friend) fun initialize_trait_images(resource_signer: &signer) {
 		let resource_addr = signer::address_of(resource_signer);
 		move_to(
 			resource_signer,

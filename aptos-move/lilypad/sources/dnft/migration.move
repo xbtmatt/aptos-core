@@ -27,6 +27,10 @@ module pond::migration {
    const EMAX_NOT_SUPPLY: u64 = 1;
    /// Toad store doesn't exist yet.
    const ETOAD_STORE_DOES_NOT_EXIST: u64 = 2;
+   /// The maximum supply of the given collection needs to be 4,000.
+   const EMAXIMUM_DOES_NOT_MATCH: u64 = 3;
+   /// Migrated vs unmigrated tokens are out of sync. The amount of both should sum to 4,000.
+   const ESUPPLY_OUT_OF_SYNC: u64 = 4;
 
    struct CollectionV2Config has key {
       unmigrated_v1_tokens: u64,
@@ -54,13 +58,17 @@ module pond::migration {
       treasury_address: address,
    ): ConstructorRef acquires CollectionV2Config {
       let creator_addr = signer::address_of(creator);
+      lilypad::assert_lilypad_exists(creator_address);
       // ensures the original collection exists (and is, by implication, owned by `creator`)
       token::check_collection_exists(creator_addr, v1_collection_name);
 
+      // check maximums and supplies
       let maximum = *option::extract(token::get_collection_maximum(creator_addr, v1_collection_name));
       let supply = *option::extract(token::get_collection_supply(creator_addr, v1_collection_name));
-      assert(maximum == supply, error::invalid_state(EMAX_NOT_SUPPLY));
+      assert!(maximum == supply, error::invalid_state(EMAX_NOT_SUPPLY));
+      assert!(maximum == MAXIMUM_SUPPLY, error::invalid_state(EMAXIMUM_DOES_NOT_MATCH));
 
+      // create the collection & get its constructor ref
       let collection_constructor_ref = collection::create_fixed_collection(
          creator,
          v2_collection_description,
@@ -70,15 +78,17 @@ module pond::migration {
          v2_collection_uri,
       );
 
+      // create object reference and refs from constructor_ref
       let collection_object = object::object_from_constructor_ref<Collection>(&collection_constructor_ref);
       let extend_ref = object::generate_extend_ref(&collection_constructor_ref);
       let transfer_ref = object::generate_transfer_ref(&collection_constructor_ref);
       let mutator_ref = collection::generate_mutator_ref(&collection_constructor_ref);
 
+      // store misc info in collection config for bookkeeping as well as the collection object refs
       move_to(
          creator,
          CollectionV2Config {
-            unmigrated_v1_tokens: maximum,
+            unmigrated_v1_tokens: MAXIMUM_SUPPLY,
             migrated_v1_tokens: 0,
             v1_collection: v1_collection_name,
             v2_collection: v2_collection_name,
@@ -88,6 +98,9 @@ module pond::migration {
             mutator_ref: mutator_ref,
          }
       );
+
+      // lastly, initialize all trait images
+      toad_v2::initialize_trait_images(creator);
    }
 
    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -100,7 +113,7 @@ module pond::migration {
    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-   public fun swap_toad_for_v2_and_store(
+   public fun swap_v1_for_v2(
       toad_owner: &signer,
       toad_name: String,
       creator_address: address,
@@ -115,41 +128,53 @@ module pond::migration {
 
       let (resource_signer, resource_addr) = lilypad::internal_get_resource_signer_and_addr(creator_address);
 
-      let (token_constructor_ref, toad_object) = store_v1_and_create_v2(
+      store_v1_and_create_v2(
          resource_signer,
+         resource_addr,
          toad_owner,
          token,
          keys,
          values,
       );
+
+      increment_migrated_and_decrement_unmigrated(resource_addr);
    }
 
    fun store_v1_and_create_v2(
       resource_signer: &signer,
+      resource_addr: address,
       toad_owner: &signer,
       token: Token,
       keys: vector<String>,
       values: vector<String>,
-   ): (ConstructorRef, Object<Aptoad>) acquires CollectionV2Config {
-      // run all checks on v1 vs. v2 token
-
+   ) acquires CollectionV2Config {
+      let collection_object = borrow_global<CollectionV2Config>(resource_addr).v2_collection_object;
       // create v2 version
       let (token_constructor_ref, aptoad_object) = toad_v2::create_from_v1(
+         resource_signer,
+         resource_addr,
+         collection_object,
          token,
          keys,
          values
       );
 
-
-
       // transfer
-      object::transfer(, aptoad_object, )
+      let owner_addr = signer::address_of(toad_owner);
+      object::transfer(resource_signer, aptoad_object, owner_addr);
 
-
+      // store v1 toad
       store_toad(token);
-      // return ConstructorRef and Object<Aptoad>
+   }
 
-      (token_constructor_ref, aptoad_object)
+   fun increment_migrated_and_decrement_unmigrated(
+      resource_addr: address,
+   ) acquires CollectionV2Config {
+      let collection_v2_config = borrow_global_mut<CollectionV2Config>(resource_addr);
+      *collection_v2_config.unmigrated_v1_tokens = *collection_v2_config.unmigrated_v1_tokens - 1;
+      *collection_v2_config.migrated_v1_tokens = *collection_v2_config.migrated_v1_tokens + 1;
+      assert!(*collection_v2_config.migrated_v1_tokens + *collection_v2_config.unmigrated_v1_tokens == MAXIMUM_SUPPLY,
+         error::invalid_state(ESUPPLY_OUT_OF_SYNC));
    }
 
    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -207,6 +232,19 @@ module pond::migration {
    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+   #[view]
+   public fun get_token_object_addr(
+      creator_addr: address,
+      collection_name: String,
+      token_name: String,
+   ): address {
+      create_token_address(
+         &creator_addr,
+         &collection_name,
+         &token_name,
+      )
+   }
 
    #[view]
    public fun get_v1_and_v2_supply(
