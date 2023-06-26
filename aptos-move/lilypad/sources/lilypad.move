@@ -13,6 +13,7 @@ module pond::lilypad {
     use aptos_framework::event::{Self, EventHandle};
     use aptos_std::simple_map::{Self, SimpleMap};
     use aptos_token::token::{Self};
+	 friend pond::migration;
 
     const MILLI_CONVERSION_FACTOR: u64 = 1000;
     const MICRO_CONVERSION_FACTOR: u64 = 1000000;
@@ -25,7 +26,7 @@ module pond::lilypad {
 
 	 const U64_MAX: u64 = 18446744073709551615;
 
-	 const MAX_MINTS_PER_TX: u64 = 3;
+	 const MAX_MINTS_PER_TX: u64 = 100;
 	 const MAX_MINTS_PER_WHITELIST_USER: u64 = 3;
 	 const MAX_VIP_MINTS: u64 = 210;
 
@@ -783,7 +784,7 @@ module pond::lilypad {
 	//	NEVER make this publicentry!!!!!
 	//	NEVER make this publicentry!!!!!
 	// you could potentially give access to signers' collections if this is publicly exposed
-	fun internal_get_resource_signer_and_addr(
+	public(friend) fun internal_get_resource_signer_and_addr(
 		creator_addr: address,
 		//collection_name: String,
 	): (signer, address) acquires LilypadCollectionData {
@@ -797,7 +798,7 @@ module pond::lilypad {
 
 	// wraps the internal, unchecked version of the function above (internal_.get_resource_signer_and_addr)
 	// into a safe, signed version of it. Ensures that we distinguish between explicit/unchecked vs safe
-	fun safe_get_resource_signer_and_addr(
+	public(friend) fun safe_get_resource_signer_and_addr(
 		creator: &signer,
 		//collection_name: String,
 	): (signer, address) acquires LilypadCollectionData {

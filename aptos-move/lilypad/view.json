@@ -1,0 +1,22 @@
+{
+  "function_id": "0x1f03a48de7dc0a076d275ebdeb0d80289b5a84a076dbf44fab69f38946de4115::migration::view_generic_pmap_and_uri",
+  "type_args": [],
+  "args": [
+    {
+      "type": "string",
+      "value": "Aptoad #3935"
+    },
+    {
+      "type": "address",
+      "value": "0x1f03a48de7dc0a076d275ebdeb0d80289b5a84a076dbf44fab69f38946de4115"
+    },
+    {
+      "type": "address",
+      "value": "0x63f82604ab0a3f92fd8e04a46cc900f4adb6c3111dae1b68fd216f85e99555ee"
+    },
+    {
+      "type": "string",
+      "value": "Aptos Toad Overload"
+    }
+  ]
+}

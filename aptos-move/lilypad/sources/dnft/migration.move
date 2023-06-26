@@ -1,43 +1,319 @@
 module pond::migration {
-   // use std::signer;
+   use std::signer;
+   use std::error;
+   use std::option;
+   // use std::table;
+   use std::object::{Object, ConstructorRef};
    use std::vector;
    use aptos_token::property_map;
-   use aptos_token::token;
+   use aptos_token::token::{Self, Token, TokenId};
+   use aptos_token_objects::collection::{Self, Collection, MutatorRef as CollectionMutatorRef};
    use std::string::{utf8 as str, String};
+   use pond::lilypad::{internal_get_resource_signer_and_addr};
 
    const COLLECTION_NAME: vector<u8> = b"Aptos Toad Overload";
    const CREATOR_ADDRESS: address = @resource_creator_addr;
 
    const PROPERTY_MAP_STRING_TYPE: vector<u8> = b"0x1::string::String";
 
+   const COLLECTION_V2_DESCRIPTION: vector<u8> = b"The flagship Aptos NFT | 4000 dynamic pixelated toads taking a leap into the Aptos pond.";
+   const COLLECTION_V2_URI: vector<u8> = b"https://arweave.net/AbA33tqZQj3fJtfn8U4P3EQaCBD9pUWoVNRyTosCxeQ";
+   const MAXIMUM_SUPPLY: u64 = 4000;
+   const TREASURY_ADDRESS: address = @0x790bc9aa92d6e54fccc7ebd699386b0d526dad9686971ff1720dac513c5ba4dc;
+
+   /// You are not the owner of that toad.
+   const ENOT_OWNER: u64 = 0;
+   /// Collection supply isn't equal to the collection maximum. There is an issue with the collection supply.
+   const EMAX_NOT_SUPPLY: u64 = 1;
+   /// Toad store doesn't exist yet.
+   const ETOAD_STORE_DOES_NOT_EXIST: u64 = 2;
+
+   struct CollectionV2Config has key {
+      unmigrated_v1_tokens: u64,
+      migrated_v1_tokens: u64,
+      v1_collection: String,
+      v2_collection: String,
+      v2_collection_object: Object<Collection>,
+      extend_ref: ExtendRef,
+      transfer_ref: TransferRef,
+      mutator_ref: CollectionMutatorRef,
+   }
+
+   struct ToadStore has key {
+      inner: Table<TokenId, Token>,
+   }
+
+   public fun initialize_v2_collection(
+      creator: &signer,
+      v1_collection_name: String,
+      v2_collection_uri: String,
+      v2_collection_name: String,
+      v2_collection_description: String,
+      new_royalty_numerator: u64,
+      new_royalty_denominator: u64,
+      treasury_address: address,
+   ): ConstructorRef acquires CollectionV2Config {
+      let creator_addr = signer::address_of(creator);
+      // ensures the original collection exists (and is, by implication, owned by `creator`)
+      token::check_collection_exists(creator_addr, v1_collection_name);
+
+      let maximum = *option::extract(token::get_collection_maximum(creator_addr, v1_collection_name));
+      let supply = *option::extract(token::get_collection_supply(creator_addr, v1_collection_name));
+      assert(maximum == supply, error::invalid_state(EMAX_NOT_SUPPLY));
+
+      let collection_constructor_ref = collection::create_fixed_collection(
+         creator,
+         v2_collection_description,
+         MAXIMUM_SUPPLY,
+         v2_collection_name,
+         royalty::create(new_royalty_numerator, new_royalty_denominator, treasury_address),
+         v2_collection_uri,
+      );
+
+      let collection_object = object::object_from_constructor_ref<Collection>(&collection_constructor_ref);
+      let extend_ref = object::generate_extend_ref(&collection_constructor_ref);
+      let transfer_ref = object::generate_transfer_ref(&collection_constructor_ref);
+      let mutator_ref = collection::generate_mutator_ref(&collection_constructor_ref);
+
+      move_to(
+         creator,
+         CollectionV2Config {
+            unmigrated_v1_tokens: maximum,
+            migrated_v1_tokens: 0,
+            v1_collection: v1_collection_name,
+            v2_collection: v2_collection_name,
+            v2_collection_object: collection_object,
+            extend_ref: extend_ref,
+            transfer_ref: transfer_ref,
+            mutator_ref: mutator_ref,
+         }
+      );
+   }
+
+   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+   ///////////////////////                                                                   ///////////////////////
+   ///////////////////////                        toad creation/swap                         ///////////////////////
+   ///////////////////////                                                                   ///////////////////////
+   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+   public fun swap_toad_for_v2_and_store(
+      toad_owner: &signer,
+      toad_name: String,
+      creator_address: address,
+      collection_name: String,
+   ) {
+      let (token, keys, values) = extract_generic_v1_toad_and_traits(
+         toad_owner,
+         toad_name,
+         creator_address,
+         collection_name
+      );
+
+      let (resource_signer, resource_addr) = lilypad::internal_get_resource_signer_and_addr(creator_address);
+
+      let (token_constructor_ref, toad_object) = store_v1_and_create_v2(
+         resource_signer,
+         toad_owner,
+         token,
+         keys,
+         values,
+      );
+   }
+
+   fun store_v1_and_create_v2(
+      resource_signer: &signer,
+      toad_owner: &signer,
+      token: Token,
+      keys: vector<String>,
+      values: vector<String>,
+   ): (ConstructorRef, Object<Aptoad>) acquires CollectionV2Config {
+      // run all checks on v1 vs. v2 token
+
+      // create v2 version
+      let (token_constructor_ref, aptoad_object) = toad_v2::create_from_v1(
+         token,
+         keys,
+         values
+      );
+
+
+
+      // transfer
+      object::transfer(, aptoad_object, )
+
+
+      store_toad(token);
+      // return ConstructorRef and Object<Aptoad>
+
+      (token_constructor_ref, aptoad_object)
+   }
+
+   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+   ///////////////////////                                                                   ///////////////////////
+   ///////////////////////                      toad extraction/storage                      ///////////////////////
+   ///////////////////////                                                                   ///////////////////////
+   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+   fun store_toad(
+      resource_signer: &signer,
+      token: Token,
+   ) acquires ToadStore {
+      assert!(exists<ToadStore>(resource_addr), error::invalid_state(ETOAD_STORE_DOES_NOT_EXIST));
+      let resource_addr = signer::address_of(resource_signer);
+      let toad_store = borrow_global_mut<ToadStore>(resource_addr);
+      table::add(&mut toad_store.inner, token.id, token);
+   }
+
+   public fun extract_v1_toad_and_traits(
+      toad_owner: &signer,
+      toad_name: String,
+   ): (Token, vector<String>, vector<String>) {
+      let owner_addr = signer::address_of(toad_owner);
+      let token_id = create_nft_token_id(CREATOR_ADDRESS, str(COLLECTION_NAME), toad_name);
+      assert!(token::balance_of(owner_addr, token_id) == 1, error::permission_denied(ENOT_OWNER));
+      let token = token::withdraw_token(toad_owner, token_id, 1);
+      let (keys, values) = get_keys_and_values(owner_addr, token_id);
+      (token, keys, values)
+   }
+
+   public fun extract_generic_v1_toad_and_traits(
+      toad_owner: &signer,
+      toad_name: String,
+      creator_address: address,
+      collection_name: String,
+   ): (Token, vector<String>, vector<String>) {
+      let owner_addr = signer::address_of(toad_owner);
+      let token_id = create_nft_token_id(creator_address, collection_name, toad_name);
+      assert!(token::balance_of(owner_addr, token_id) == 1, error::permission_denied(ENOT_OWNER));
+      let token = token::withdraw_token(toad_owner, token_id, 1);
+      let (keys, values) = get_keys_and_values(owner_addr, token_id);
+      (token, keys, values)
+   }
+
+   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+   ///////////////////////                                                                   ///////////////////////
+   ///////////////////////                           view functions                          ///////////////////////
+   ///////////////////////                                                                   ///////////////////////
+   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+   #[view]
+   public fun get_v1_and_v2_supply(
+      creator_1: address,
+      collection_1_name: String,
+      collection_2_obj: Object<Collection>,
+   ): (u64, u64) {
+      let supply_1 = *option::borrow(&token::get_collection_supply(creator_1, collection_1_name));
+      let supply_2 = *option::borrow(&collection::count(collection_2_obj));
+      (supply_1, supply_2)
+   }
+
+   // NFTs will always only have 1 property version.
+   // This function may not work as expected for fungible/semi-fungible tokens.
+   #[view]
+   public fun create_nft_token_id(
+      creator: address,
+      collection: String,
+      name: String,
+   ): TokenId {
+      let token_data_id = token::create_token_data_id(creator, collection, name);
+      let property_version = token::get_tokendata_largest_property_version(creator, token_data_id);
+      token::create_token_id(token_data_id, property_version)
+   }
+
    #[view]
    public fun view_toad_pmap(
-      token_name: String,
+      toad_name: String,
       owner_address: address,
    ): (vector<String>, vector<String>) {
-      let token_data_id = token::create_token_data_id(CREATOR_ADDRESS, str(COLLECTION_NAME), token_name);
+      let token_id = create_nft_token_id(CREATOR_ADDRESS, str(COLLECTION_NAME), toad_name);
+      get_keys_and_values(owner_address, token_id)
+   }
+
+   #[view]
+   public fun view_pmap_and_uri(
+      toad_name: String,
+      owner_address: address,
+   ): (vector<String>, vector<String>, String) {
+      let token_data_id = token::create_token_data_id(CREATOR_ADDRESS, str(COLLECTION_NAME), toad_name);
       let property_version = token::get_tokendata_largest_property_version(CREATOR_ADDRESS, token_data_id);
       let token_id = token::create_token_id(token_data_id, property_version);
+      
+      let token_uri = token::get_tokendata_uri(CREATOR_ADDRESS, token_data_id);
+      let (keys, values) = get_keys_and_values(owner_address, token_id);
+      (keys, values, token_uri)
+   }
 
+   #[view]
+   public fun view_generic_pmap(
+      toad_name: String,
+      owner_address: address,
+      creator_address: address,
+      collection_name: String,
+   ): (vector<String>, vector<String>) {
+      let token_id = create_nft_token_id(creator_address, collection_name, toad_name);
+      get_keys_and_values(owner_address, token_id)
+   }
+
+   #[view]
+   public fun view_generic_pmap_and_uri(
+      toad_name: String,
+      owner_address: address,
+      creator_address: address,
+      collection_name: String,
+   ): (vector<String>, vector<String>, String) {
+      let token_data_id = token::create_token_data_id(creator_address, collection_name, toad_name);
+      let property_version = token::get_tokendata_largest_property_version(creator_address, token_data_id);
+      let token_id = token::create_token_id(token_data_id, property_version);
+      
+      let token_uri = token::get_tokendata_uri(creator_address, token_data_id);
+      let (keys, values) = get_keys_and_values(owner_address, token_id);
+      (keys, values, token_uri)
+   }
+
+   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+   ///////////////////////                                                                   ///////////////////////
+   ///////////////////////                        property map helpers                       ///////////////////////
+   ///////////////////////                                                                   ///////////////////////
+   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+   fun get_keys_and_values(
+      owner_address: address,
+      token_id: TokenId,
+   ): (vector<String>, vector<String>) {
       let property_map = token::get_property_map(owner_address, token_id);
       let property_map_length = property_map::length(&property_map);
-      //let keys = property_map::keys(&property_map);
-      //let types = property_map::types(&property_map);
-      let keys = get_keys();
+      let all_keys = get_keys();
+      let keys = vector<String> [];
       let values = vector<String> [];
 
-      vector::for_each(keys, |k| {
+      vector::for_each(all_keys, |k| {
          if (property_map::contains_key(&property_map, &k)) {
-            let v = property_map::read_string(&property_map, &k);
-            vector::push_back(&mut values, v);
+            let property_value = property_map::borrow(&property_map, &k);
+            let v = property_map::borrow_value(property_value);
+            vector::push_back(&mut keys, k);
+            vector::push_back(&mut values, str(v));
          };
-         //std::debug::print(&v);
       });
 
       // we've never messed with the toads property map, so there's no reason
       // for it to be different than the length we've created here
       assert!(property_map_length == vector::length(&values), 0);
-      //pond::bash_colors::print_key_value_as_string(b"property map length: ", pond::bash_colors::u64_to_string(property_map_length));
 
       (keys, values)
    }
