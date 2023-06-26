@@ -1,5 +1,5 @@
 module aptoads_objects::dynamic_toads {
-   use std::object::{Self, Object, ConstructorRef, ExtendRef, TransferRef};
+   use std::object::{Self, Object, ConstructorRef, ExtendRef, TransferRef, LinearTransferRef};
    use aptos_token::token::{Self as token_v1, Token};
    use token_objects::token::{Self as token_v2, MutatorRef, Token as TokenObject};
    use token_objects::collection::{Self, Collection};
@@ -69,6 +69,8 @@ module aptoads_objects::dynamic_toads {
    const ENO_BODY_TRAIT: u64 = 5;
    /// There exists an invalid property map key on the original token.
    const EINVALID_PROPERTY_MAP_KEY: u64 = 6;
+   /// The object referenced does not have a Refs resource.
+   const EOBJECT_DOES_NOT_HAVE_REFS: u64 = 7;
 
 	public(friend) fun create_aptoad_object(
 		v1_token: Token,
@@ -128,11 +130,14 @@ module aptoads_objects::dynamic_toads {
 		// get token v2 mutator ref
 		let mutator_ref = token_v2::generate_mutator_ref(&constructor_ref);
 
-		// 
+		// get base object
+		let base_token_object = object::object_from_constructor_ref(&constructor_ref);
+
 		let (background, body, clothing, headwear, eyewear, mouth, fly) = create_v2_traits(
 			resource_signer,
 			resource_addr,
 			collection_object,
+			base_token_object,
 			keys,
 			values
 		);
@@ -160,6 +165,7 @@ module aptoads_objects::dynamic_toads {
 		resource_signer: &signer,
 		resource_addr: address,
 		collection_object: Object<Collection>,
+		base_token_object: Object<Token>,
 		keys: vector<String>,
 		values: vector<String><
 	): (String, String, Option<Object<Clothing>>, Option<Object<Headwear>>, Option<Object<Eyewear>>, Option<Object<Mouth>>, Option<Object<Fly>>) acquires Clothing, Headwear, Eyewear, Mouth, Fly {
@@ -183,22 +189,32 @@ module aptoads_objects::dynamic_toads {
 			} else if (k == str(b"Clothing")) {
 				let clothing_constructor_ref = create<Clothing>(resource_signer, v);
 				let clothing_object = object::object_from_constructor_ref(&clothing_constructor_ref);
+				// TODO: call toad_equip_trait instead of doing this. Keep equip logic together to avoid mistakes.
+				internal_trait_transfer(clothing_object, base_token_object);
 				option::fill(&mut clothing, clothing_object);
 			} else if (k == str(b"Headwear")) {
 				let headwear_constructor_ref = create<Headwear>(resource_signer, v);
 				let headwear_object = object::object_from_constructor_ref(&headwear_constructor_ref);
+				// TODO: call toad_equip_trait instead of doing this. Keep equip logic together to avoid mistakes.
+				internal_trait_transfer(headwear_object, base_token_object);
 				option::fill(&mut headwear, headwear_object);
 			} else if (k == str(b"Eyewear")) {
 				let eyewear_constructor_ref = create<Eyewear>(resource_signer, v);
 				let eyewear_object = object::object_from_constructor_ref(&eyewear_constructor_ref);
+				// TODO: call toad_equip_trait instead of doing this. Keep equip logic together to avoid mistakes.
+				internal_trait_transfer(eyewear_object, base_token_object);
 				option::fill(&mut eyewear, eyewear_object);
 			} else if (k == str(b"Mouth")) {
 				let mouth_constructor_ref = create<Mouth>(resource_signer, v);
 				let mouth_object = object::object_from_constructor_ref(&mouth_constructor_ref);
+				// TODO: call toad_equip_trait instead of doing this. Keep equip logic together to avoid mistakes.
+				internal_trait_transfer(mouth_object, base_token_object);
 				option::fill(&mut mouth, mouth_object);
 			} else if (k == str(b"Fly")) {
 				let fly_constructor_ref = create<Fly>(resource_signer, v);
 				let fly_object = object::object_from_constructor_ref(&fly_constructor_ref);
+				// TODO: call toad_equip_trait instead of doing this. Keep equip logic together to avoid mistakes.
+				internal_trait_transfer(fly_object, base_token_object);
 				option::fill(&mut fly, fly_object);
 			} else {
 				// do nothing, could throw an error here to be extra safe...ok I'll do it.
@@ -209,6 +225,21 @@ module aptoads_objects::dynamic_toads {
 		assert!(background != str(b""), error::invalid_state(ENO_BACKGROUND_TRAIT));
 		assert!(body != str(b""), error::invalid_state(ENO_BODY_TRAIT));
 		(background, body, clothing, headwear, eyewear, mouth, fly)
+	}
+
+	fun internal_trait_transfer<T>(
+		trait_obj: Object<T>,
+		to: address,
+	) {
+		let linear_transfer_ref = internal_get_trait_linear_transfer_ref(trait_obj);
+		object::transfer_with_ref(linear_transfer_ref, to);
+	}
+
+	fun internal_get_trait_linear_transfer_ref<T>(
+		trait_obj: Object<T>,
+	): LinearTransferRef acquires Clothing, Headwear, Eyewear, Mouth Fly {
+		assert!(exists<Refs>(object::object_address(trait_obj)), error::invalid_state(EOBJECT_DOES_NOT_HAVE_REFS));
+		object::generate_linear_transfer_ref(&borrow_global<Refs>(object_address).transfer_ref)
 	}
 
 	// I think we're going to have to make these semi fungible/fungible assets.?
@@ -269,6 +300,9 @@ module aptoads_objects::dynamic_toads {
          );
       };
 
+		let transfer_ref = object::generate_transfer_ref(&constructor_ref);
+		let extend_ref = object::generate_extend_ref(&constructor_ref);
+
       move_to(
          &token_signer,
          Refs {
@@ -276,6 +310,9 @@ module aptoads_objects::dynamic_toads {
             extend_ref,
          }
       );
+		
+		// to disallow for unequipping/moving objects around without permission to do so
+		object::disable_ungated_transfer(&transfer_ref);
 
       constructor_ref
    }
