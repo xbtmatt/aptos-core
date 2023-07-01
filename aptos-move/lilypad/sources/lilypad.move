@@ -2,6 +2,7 @@ module pond::lilypad {
     use std::option::{Self};
     use std::string::{String};
 	 use std::string::bytes;
+	 use std::error;
     use aptos_std::table::{Self, Table};
     //use aptos_token::property_map::{Self, PropertyMap};
 	 use pond::iterable_table::{Self, IterableTable};
@@ -13,7 +14,7 @@ module pond::lilypad {
     use aptos_framework::event::{Self, EventHandle};
     use aptos_std::simple_map::{Self, SimpleMap};
     use aptos_token::token::{Self};
-	 friend pond::migration;
+	 //friend pond::migration;
 
     const MILLI_CONVERSION_FACTOR: u64 = 1000;
     const MICRO_CONVERSION_FACTOR: u64 = 1000000;
