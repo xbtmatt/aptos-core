@@ -1,4 +1,4 @@
-module dnft::merkle_tree {
+module pond::merkle_tree {
 	use std::signer;
 	use std::vector;
 	use std::error;

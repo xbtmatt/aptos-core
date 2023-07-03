@@ -1,4 +1,4 @@
-module aptoads_objects::dynamic_toads {
+module pond::toad_v2 {
     use std::object::{Self, Object, ConstructorRef, ExtendRef, TransferRef, LinearTransferRef};
     use aptos_token::token::{Self as token_v1, Token};
     use token_objects::token::{Self as token_v2, MutatorRef, Token as TokenObject};
@@ -11,7 +11,6 @@ module aptoads_objects::dynamic_toads {
     use std::vector;
     use std::signer;
     use std::hash;
-    friend pond::migration;
 
     #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
     struct Aptoad has key {
