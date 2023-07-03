@@ -134,7 +134,7 @@ module pond::migration {
       let collection_object = borrow_global<CollectionV2Config>(resource_addr).v2_collection_object;
 
       // create v2 version
-      let aptoad_object = toad_v2::create_v2_from_v1(
+      let aptoad_object = toad_v2::create_v2_toad(
          resource_signer,
          resource_addr,
          collection_object,

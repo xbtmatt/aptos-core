@@ -88,11 +88,13 @@ module pond::toad_v2 {
     /// The object passed in does not have that trait type equipped.
     const ETRAIT_TYPE_NOT_EQUIPPED: u64 = 12;
     /// The object passed in is not an Aptoad.
-    const ENOT_A_TOAD: u64 = 12;
+    const ENOT_A_TOAD: u64 = 13;
     /// The object passed in was not originally a perfect toad.
-    const ENOT_PERFECT_TOAD: u64 = 12;
+    const ENOT_PERFECT_TOAD: u64 = 14;
     /// Each Aptoad must have at least 2 and no more than 7 traits.
-    const EINVALID_NUMBER_OF_TRAITS_AFTER_UPDATE: u64 = 12;
+    const EINVALID_NUMBER_OF_TRAITS_AFTER_UPDATE: u64 = 15;
+    /// The internal logic of the contract has been violated.
+    const EINVALID_INTERNAL_STATE: u64 = 16;
 
 
     // TODO: Remove later, this is purely for a sanity check
@@ -104,7 +106,7 @@ module pond::toad_v2 {
     /// and error.
     /// The merkle tree will verify the existence of this valid combination of traits.
     /// The keys & values passed in are verified, which is why we skip the get_map_from_traits check
-    public(friend) fun create_v2_from_v1(
+    public(friend) fun create_v2_toad(
         resource_signer: &signer,
         resource_addr: address,
         collection_object: Object<Collection>,
@@ -112,7 +114,7 @@ module pond::toad_v2 {
         keys: vector<String>,
         values: vector<String>,
         unvalidated_image_uri: String,
-    ) {
+    ): Object<Aptoad> {
         let trait_map = simple_map::new_from(keys, values);
         let num_traits = get_num_traits_and_run_basic_check(&trait_map);
 
@@ -137,25 +139,36 @@ module pond::toad_v2 {
         // get base object
         let base_toad_object = object::object_from_constructor_ref(&constructor_ref);
 
-        let (background, body, clothing, headwear, eyewear, mouth, fly, perfect) =
-            create_v2_traits(
-                resource_signer, resource_addr, collection_object, base_toad_object, keys, values
-            );
+        let trait_map = simple_map::new_from<String, String>(keys, values);
 
+        // unverified at this point, but `create_v2_traits` verifies this.
+        let is_perfect = (simple_map::length(&trait_map) == 2);
+        
         move_to(
             token_signer,
             Aptoad {
-                background,
-                body,
-                clothing,
-                headwear,
-                eyewear,
-                mouth,
-                fly,
-                perfect,
+                background: simple_map::borrow(&trait_map, &str(BACKGROUND)),
+                body: simple_map::borrow(&trait_map, &str(BODY)),
+                clothing: option::none<Object<Clothing>>(),
+                headwear: option::none<Object<Headwear>>(),
+                eyewear: option::none<Object<Eyewear>>(),
+                mouth: option::none<Object<Mouth>>(),
+                fly: option::none<Object<Fly>>(),
+                perfect: is_perfect,
             }
         );
 
+        let is_verified_perfect = create_v2_traits(
+            resource_signer,
+            resource_addr,
+            collection_object,
+            base_toad_object,
+            keys,
+            values
+        );
+
+        // if one is true, both need to be true. if neither are true, that's fine, too.
+        assert!(is_perfect == is_verified_perfect, error::invalid_state(EINVALID_INTERNAL_STATE));
 
         // NOTE: These are redundant. We can remove these because they will likely change the gas cost
         // of the transaction drastically. The image_uri is assumed to be unchanged and valid since I've
@@ -182,14 +195,9 @@ module pond::toad_v2 {
         base_toad_object: Object<Token>,
         keys: vector<String>,
         values: vector<String>,
-    ): (String, String, Option<Object<Clothing>>, Option<Object<Headwear>>, Option<Object<Eyewear>>, Option<Object<Mouth>>, Option<Object<Fly>>, bool) acquires Clothing, Headwear, Eyewear, Mouth, Fly {
+    ): bool acquires Clothing, Headwear, Eyewear, Mouth, Fly {
         let background = str(b"");
         let body = str(b"");
-        let clothing = option::none<Object<Clothing>>();
-        let headwear = option::none<Object<Headwear>>();
-        let eyewear = option::none<Object<Eyewear>>();
-        let mouth = option::none<Object<Mouth>>();
-        let fly = option::none<Object<Fly>>();
 
         let num_traits = vector::length(&keys);
         while(vector::length(&keys) > 0) {
@@ -201,25 +209,15 @@ module pond::toad_v2 {
             } else if (k == str(BODY)) {
                 body = v;
             } else if (k == str(CLOTHING)) {
-                let clothing_constructor_ref = create_trait<Clothing>(resource_signer, v);
-                let clothing_object = object::object_from_constructor_ref(&clothing_constructor_ref);
-                only_equip_trait(base_toad_object, clothing_object);
+                only_equip_trait(base_toad_object, create_trait<Clothing>(resource_signer, v));
             } else if (k == str(HEADWEAR)) {
-                let headwear_constructor_ref = create_trait<Headwear>(resource_signer, v);
-                let headwear_object = object::object_from_constructor_ref(&headwear_constructor_ref);
-                only_equip_trait(base_toad_object, headwear_object);
+                only_equip_trait(base_toad_object, create_trait<Headwear>(resource_signer, v));
             } else if (k == str(EYEWEAR)) {
-                let eyewear_constructor_ref = create_trait<Eyewear>(resource_signer, v);
-                let eyewear_object = object::object_from_constructor_ref(&eyewear_constructor_ref);
-                only_equip_trait(base_toad_object, eyewear_object);
+                only_equip_trait(base_toad_object, create_trait<Eyewear>(resource_signer, v));
             } else if (k == str(MOUTH)) {
-                let mouth_constructor_ref = create_trait<Mouth>(resource_signer, v);
-                let mouth_object = object::object_from_constructor_ref(&mouth_constructor_ref);
-                only_equip_trait(base_toad_object, mouth_object);
+                only_equip_trait(base_toad_object, create_trait<Mouth>(resource_signer, v));
             } else if (k == str(FLY)) {
-                let fly_constructor_ref = create_trait<Fly>(resource_signer, v);
-                let fly_object = object::object_from_constructor_ref(&fly_constructor_ref);
-                only_equip_trait(base_toad_object, fly_object);
+                only_equip_trait(base_toad_object, create_trait<Fly>(resource_signer, v));
             } else {
                 // do nothing, could throw an error here to be extra safe...ok I'll do it.
                 error::invalid_state(EINVALID_PROPERTY_MAP_KEY);
@@ -230,11 +228,11 @@ module pond::toad_v2 {
         assert!(body != str(b""), error::invalid_state(ENO_BODY_TRAIT));
 
         let perfect = (num_traits == 2);
-        (background, body, clothing, headwear, eyewear, mouth, fly, perfect)
+        (perfect)
     }
 
-    fun internal_transfer<T1, T2>(
-        trait_obj: Object<T1>,
+    fun internal_transfer<T>(
+        trait_obj: Object<T>,
         to: address,
     ) {
         let linear_transfer_ref = get_linear_transfer_ref(trait_obj);
@@ -305,13 +303,13 @@ module pond::toad_v2 {
         trait_name: String,
         image_uri: String,
         // num_trait_type: u64,
-    ): ConstructorRef {
+    ): Object<T> {
         let constructor_ref = create_fungible_asset_or_smth(
             resource_signer,
             collection_object,
             image_uri,
         );
-        let token_signer = object::generate_signer(&constructor_ref);
+        let token_signer = store_refs(&constructor_ref);
 
         if (type_info::type_of<T>() == type_info::type_of<Clothing>()) {
             move_to(&token_signer, Clothing { });
@@ -325,21 +323,7 @@ module pond::toad_v2 {
             move_to(&token_signer, Fly { });
         };
 
-        let transfer_ref = object::generate_transfer_ref(&constructor_ref);
-        let extend_ref = object::generate_extend_ref(&constructor_ref);
-
-        move_to(
-            &token_signer,
-            Refs {
-                transfer_ref,
-                extend_ref,
-            }
-        );
-        
-        // to disallow for unequipping/moving objects around without permission to do so
-        object::disable_ungated_transfer(&transfer_ref);
-
-        constructor_ref
+        object::address_to_object(signer::address_of(&token_signer))
     }
 
     /// intended to only be used by the singular equip
@@ -353,7 +337,7 @@ module pond::toad_v2 {
         assert!(exists<Aptoad>(toad_object), error::invalid_argument(ENOT_A_TOAD));
 
         // make the change before creating the trait map
-        only_equip_trait(toad_object, obj_to_equip);
+        only_equip_trait<T>(toad_object, obj_to_equip);
         
         // create the new trait map
         let new_trait_map = get_v2_trait_map(toad_object);
@@ -370,14 +354,13 @@ module pond::toad_v2 {
     /// this function will fail if there isn't a valid slot to unequip
     public entry fun unequip_and_update<T: key>(
         toad_object: Object<Aptoad>,
-        obj_to_equip: Object<T>,
         unvalidated_image_uri: String,
         proof: vector<vector<u8>>,
     ) acquires Aptoad, Clothing, Headwear, Eyewear, Mouth, Fly {
         assert!(exists<Aptoad>(toad_object), error::invalid_argument(ENOT_A_TOAD));
 
         // make the change before creating the trait map
-        only_unequip_trait(toad_object, obj_to_equip);
+        only_unequip_trait<T>(toad_object);
         
         // create the new trait map
         let new_trait_map = get_v2_trait_map(toad_object);
@@ -395,35 +378,28 @@ module pond::toad_v2 {
         toad_object: Object<Aptoad>,
         obj_to_equip: Object<T>
     ) acquires Aptoad, Clothing, Headwear, Eyewear, Mouth, Fly {
-        let object_address = object::object_address<T>(&obj_to_equip);
-
-        let option_ref = get_trait_option<T>(toad_object);
+        let option_ref = get_trait_option_from_toad<T>(toad_object);
         /*
-        let option_ref = if (exists<Clothing>(object_address)) {
+        let option_ref = if (exists<Clothing>(obj_to_equip)) {
             // let clothing_obj = object::convert<T, Clothing>(obj_to_equip);
             // option::fill<Object<Clothing>>(&mut toad_obj_resources.clothing, clothing_obj);
             &mut borrow_global_mut<Aptoad>(toad_object).clothing
-            // internal_transfer(obj_to_equip, toad_object);
-        } else if (exists<Headwear>(object_address)) {
+        } else if (exists<Headwear>(obj_to_equip)) {
             // let headwear_obj = object::convert<T, Headwear>(obj_to_equip);
             // option::fill<Object<Headwear>>(&mut toad_obj_resources.headwear, headwear_obj);
             &mut borrow_global_mut<Aptoad>(toad_object).headwear
-            // internal_transfer(obj_to_equip, toad_object);
-        } else if (exists<Eyewear>(object_address)) {
+        } else if (exists<Eyewear>(obj_to_equip)) {
             // let eyewear_obj = object::convert<T, Eyewear>(obj_to_equip);
             // option::fill<Object<Eyewear>>(&mut toad_obj_resources.eyewear, eyewear_obj);
             &mut borrow_global_mut<Aptoad>(toad_object).eyewear
-            // internal_transfer(obj_to_equip, toad_object);
-        } else if (exists<Mouth>(object_address)) {
+        } else if (exists<Mouth>(obj_to_equip)) {
             // let mouth_obj = object::convert<T, Mouth>(obj_to_equip);
             // option::fill<Object<Mouth>>(&mut toad_obj_resources.mouth, mouth_obj);
             &mut borrow_global_mut<Aptoad>(toad_object).mouth
-            // internal_transfer(obj_to_equip, toad_object);
-        } else if (exists<Fly>(object_address)) {
+        } else if (exists<Fly>(obj_to_equip)) {
             // let fly_obj = object::convert<T, Fly>(obj_to_equip);
             // option::fill<Object<Fly>>(&mut toad_obj_resources.fly, fly_obj);
             &mut borrow_global_mut<Aptoad>(toad_object).fly
-            // internal_transfer(obj_to_equip, toad_object);
         } else {
             abort error::invalid_argument(EINVALID_TRAIT_TYPE)
         };
@@ -431,20 +407,17 @@ module pond::toad_v2 {
 
         assert!(!option::is_some(option_ref), error::invalid_state(ETRAIT_TYPE_ALREADY_EQUIPPED));
         option::fill<T>(option_ref, obj_to_equip);
+
+        // transfer the object from its current owner to the toad object
         internal_transfer(obj_to_equip, toad_object);
     }
 
-    inline fun unequip_trait<T: key>(
+    inline fun only_unequip_trait<T: key>(
         toad_object: Object<Aptoad>,
-        obj_to_equip: Object<T>,
     ) {
-        abort 1
-        // run checks to make sure if traits == 2 the toad also has to be perfect or it will fail.
-
-        // run checks to see if it's a clone that exists already..?
-        // you would do this by hashing the new concat_string you verified with merkle tree
-        // and then using that as the seed for the object address checking to see if an object exists there.
-        // ImageObject or something?
+        let obj_to_unequip = get_trait_object_from_toad<T>(toad_object);
+        // transfer the object from the toad object to its owner
+        internal_transfer(object::owner(toad_object), obj_to_unequip);
     }
 
     /// this should only be run after any change has taken place
