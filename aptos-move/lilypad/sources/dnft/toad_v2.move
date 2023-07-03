@@ -22,6 +22,7 @@ module pond::toad_v2 {
         mouth: Option<Object<Mouth>>,
         fly: Option<Object<Fly>>,
         perfect: bool,
+        event_handle: 
     }
 
     #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
@@ -42,6 +43,33 @@ module pond::toad_v2 {
         mutator_ref: MutatorRef,
     }
 
+    #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
+    struct EventHandles has key {
+        equip_event: EventHandle<EquipEvent>,
+        unequip_event: EventHandle<UnequipEvent>,
+        migration_events: EventHandle<MigrationEvent>,
+    }
+
+    struct EquipEvent has copy, drop, store {
+        toad_object: Object<Aptoad>,
+        equipped_trait: Object<Token>,
+    }
+
+    struct UnequipEvent has copy, drop, store {
+        toad_object: Object<Aptoad>,
+        unequipped_trait: Object<Token>,
+    }
+
+    struct MigrationEvent has copy, drop, store {
+        creator: address,
+        old_collection_name: String,
+        new_collection_name: String,
+        new_collection: Object<Collection>,
+        new_token_name: String,
+        toad_object: Object<Aptoad>,
+        perfect: bool,
+    }
+
     const LOWER_TO_UPPER_ASCII_DIFFERENCE: u64 = 32;
     const UPPERCASE_LOWER_BOUND: u64 = 65;
     const UPPERCASE_UPPER_BOUND: u64 = 90;
@@ -54,6 +82,8 @@ module pond::toad_v2 {
     
     // Equippable Headwear for an Aptoad. 🧢
     const TRAIT_DESCRIPTION_FORMAT: vector<u8> = b"Equippable {} for an Aptoad. {}";
+
+    const PERFECT_TOAD_DESCRIPTION: vector<u8> = b"{} is a perfect toad- one of only ten.";
 
     const BACKGROUND: vector<u8> = b"Background";
     const BODY: vector<u8> = b"Body";
@@ -95,8 +125,6 @@ module pond::toad_v2 {
     const ENOT_PERFECT_TOAD: u64 = 14;
     /// Each Aptoad must have at least 2 and no more than 7 traits.
     const EINVALID_NUMBER_OF_TRAITS_AFTER_UPDATE: u64 = 15;
-    /// The internal logic of the contract has been violated.
-    const EINVALID_INTERNAL_STATE: u64 = 16;
 
 
     // TODO: Remove later, this is purely for a sanity check
@@ -117,14 +145,19 @@ module pond::toad_v2 {
         values: vector<String>,
         unvalidated_image_uri: String,
     ): Object<Aptoad> {
-        let trait_map = simple_map::new_from(keys, values);
+        let trait_map = simple_map::new_from<String, String>(keys, values);
         let num_traits = get_num_traits_and_run_basic_check(&trait_map);
+        let is_perfect = (num_traits == 2);
 
         // get v1 token info that we're going to use
         let token_id = token_v1::get_token_id(&token);
         let token_data_id = token_v1::get_tokendata_id(token_id);
         let token_uri = token_v1::get_tokendata_uri(resource_addr, token_data_id);
-        let token_description = token_v1::get_tokendata_description(token_data_id);
+        let token_description = if (is_perfect) {
+            std::string_utils::format1(str(PERFECT_TOAD_DESCRIPTION), token_data_id.name)
+        } else {
+            token_v1::get_tokendata_description(token_data_id)
+        };
         let (creator_addr, collection_name, token_name) = token_v1::get_token_data_id_fields(&token_id);
         assert!(resource_addr == creator_addr, error::invalid_argument(ECREATOR_ADDRESSES_DONT_MATCH));
         let constructor_ref = token_v2::create_named_token(
@@ -141,10 +174,17 @@ module pond::toad_v2 {
         // get base object
         let base_toad_object = object::object_from_constructor_ref(&constructor_ref);
 
-        let trait_map = simple_map::new_from<String, String>(keys, values);
-
-        // unverified at this point, but `create_v2_traits` verifies this.
-        let is_perfect = (simple_map::length(&trait_map) == 2);
+        initialize_event_store(token_signer);
+        emit_migration_event(
+            token_signer,
+            creator_addr,
+            collection_name,
+            collection_name,
+            collection_object,
+            token_name,
+            base_toad_object,
+            perfect,
+        );
         
         move_to(
             token_signer,
@@ -169,9 +209,6 @@ module pond::toad_v2 {
             values
         );
 
-        // if one is true, both need to be true. if neither are true, that's fine, too.
-        assert!(is_perfect == is_verified_perfect, error::invalid_state(EINVALID_INTERNAL_STATE));
-
         // NOTE: These are redundant. We can remove these because they will likely change the gas cost
         // of the transaction drastically. The image_uri is assumed to be unchanged and valid since I've
         // never changed them.
@@ -188,6 +225,19 @@ module pond::toad_v2 {
         // TODO: Add token v1 => v2 swap event emission here!
         // TODO: Add token v1 => v2 swap event emission here!
         // TODO: Add token v1 => v2 swap event emission here!
+    }
+
+    fun initialize_event_store(
+        token_signer: &signer,
+    ) acquires EventHandles {
+        move_to(
+            token_signer,
+            EventHandles {
+                equip_event: event::new_event_handle<EquipEvent>(token_signer),
+                unequip_event: event::new_event_handle<UnequipEvent>(token_signer),
+                migration_events: event::new_event_handle<MigrationEvent>(token_signer),
+            }
+        );
     }
 
     fun create_v2_traits(
@@ -343,6 +393,11 @@ module pond::toad_v2 {
         proof: vector<vector<u8>>,
     ) acquires Aptoad, Clothing, Headwear, Eyewear, Mouth, Fly {
         assert!(exists<Aptoad>(toad_object), error::invalid_argument(ENOT_A_TOAD));
+        assert!(exists<T>(obj_to_equip), error::invalid_argument(EINVALID_TRAIT_TYPE));
+        // may have to use this if the compiler gets mad at the previous line
+        // TODO: Remove this or remove above
+        assert!(is_a_trait_type(obj_to_equip), error::invalid_argument(EINVALID_TRAIT_TYPE));
+
 
         // make the change before creating the trait map
         only_equip_trait<T>(toad_object, obj_to_equip);
@@ -417,6 +472,7 @@ module pond::toad_v2 {
         option::fill<T>(option_ref, obj_to_equip);
 
         let allow_ungated_transfer = false;
+        emit_equip_event(toad_object, obj_to_equip);
         internal_transfer(obj_to_equip, toad_object, allow_ungated_transfer);
     }
 
@@ -426,6 +482,7 @@ module pond::toad_v2 {
         let obj_to_unequip = get_trait_object_from_toad<T>(toad_object);
 
         let allow_ungated_transfer = true;
+        emit_unequip_event(toad_object, obj_to_unequip);
         internal_transfer(object::owner(toad_object), obj_to_unequip, allow_ungated_transfer);
     }
 
@@ -827,6 +884,80 @@ module pond::toad_v2 {
         })
     }
 
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////                                                                   ///////////////////////
+    ///////////////////////                         misc, event emitters                      ///////////////////////
+    ///////////////////////                                                                   ///////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    inline fun emit_migration_event(
+        token_signer: &signer,
+        creator: address,
+        old_collection_name: String,
+        new_collection_name: String,
+        new_collection: Object<Collection>,
+        new_token_name: String,
+        toad_object: Object<Aptoad>,
+        perfect: bool,
+    ) acquires EventHandles {
+        let event_handles = borrow_global_mut<EventHandles>(signer::address_of(token_signer));
+        event::emit_event(
+            &mut event_handles.migration_events,
+            MigrationEvent {
+                creator,
+                old_collection_name,
+                new_collection_name,
+                new_collection,
+                new_token_name,
+                toad_object,
+                perfect,
+            }
+        );
+    }
+
+    inline fun emit_equip_event(
+        toad_object: Object<Aptoad>,
+        equipped_trait: Object<Token>,
+    ) acquires EventHandles {
+        let token_signer = 
+        let event_handles = borrow_global_mut<EventHandles>(signer::address_of(token_signer));
+        event::emit_event(
+            &mut event_handles.equip_events,
+            EquipEvent {
+                toad_object,
+                equipped_trait,
+            }
+        );
+    }
+
+    inline fun emit_unequip_event(
+        toad_object: Object<Aptoad>,
+        unequipped_trait: Object<Token>,
+    ) acquires EventHandles {
+        let token_signer = 
+        let event_handles = borrow_global_mut<EventHandles>(signer::address_of(token_signer));
+        event::emit_event(
+            &mut event_handles.unequip_events,
+            UnequipEvent {
+                toad_object,
+                unequipped_trait,
+            }
+        );
+    }
+
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////                                                                   ///////////////////////
+    ///////////////////////                             unit tests                            ///////////////////////
+    ///////////////////////                                                                   ///////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     #[test]
     fun test_if_empty_string_equal_empty_vec() {
@@ -854,5 +985,5 @@ module pond::toad_v2 {
         assert!(to_lower(str(b"HELLO")) == str(b"hello"));
         assert!(to_lower(str(b"hello WORLD")) == str(b"hello world"));
         assert!(to_lower(str(b"hello WORLD !@#[`{")) == str(b"hello world !@#[`{"));
-    }
+    }    
 }
