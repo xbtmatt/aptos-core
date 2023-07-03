@@ -4,7 +4,7 @@ module dnft::merkle_tree {
 	use std::error;
 	use std::hash;
 
-	struct MerkleTree has key {
+	struct MerkleTree has store {
 		root_hash: vector<u8>,
 	}
 
@@ -12,36 +12,31 @@ module dnft::merkle_tree {
 	const ENOT_OWNER: u64 = 0;
 	/// The MerkleTree resource already exists.
 	const EALREADY_EXISTS: u64 = 1;
-	/// The MerkleTree resource does not exist.
-	const ERESOURCE_NOT_FOUND: u64 = 2;
 	/// Invalid value for sibling position flag byte.
-	const EINVALID_FLAG: u64 = 3;
+	const EINVALID_FLAG: u64 = 2;
 	/// The sibling position flag is not present.
-	const EFLAG_NOT_PRESENT: u64 = 4;
+	const EFLAG_NOT_PRESENT: u64 = 3;
+	/// The hash length isn't 32 bytes.
+	const EINCORRECT_HASH_LENGTH: u64 = 4;
 
-	public entry fun init_merkle_tree(
-		creator: &signer,
-		root_hash: vector<u8>,
-	) {
-		let creator_addr = signer::address_of(creator);
-		assert!(creator_addr == @dnft, error::permission_denied(ENOT_OWNER));
-		assert!(!exists<MerkleTree>(creator_addr), error::already_exists(EALREADY_EXISTS));
-		move_to(
-			creator,
-			MerkleTree {
-				root_hash,
-			}
-		);
+	/// a sha3_256 hash is a vector<u8> of 32 elements
+	const HASH_LENGTH: u64 = 32;
+
+	public fun new(root_hash: vector<u8>): MerkleTree {
+		assert!(vector::length(&root_hash) == HASH_LENGTH, error::invalid_argument(EINCORRECT_HASH_LENGTH)); 
+		MerkleTree {
+			root_hash
+		}
 	}
 
 	#[view]
-	/// Note that the first bit of each hash in the proof vector represents a boolean value for the siblinig hash being on the left or the right side when hashed.
+	/// Note that the first bit of each hash in the proof vector represents a boolean value for the sibling hash being on the left or the right side when hashed.
 	/// That is, each vector<u8> inside the `proof: vector<vector<u8>>` will consist of 1 + 32 bytes
 	public fun verify_proof(
-		leaf_hash: vector<u8>,			 // leaf hash to verify the existence of in the tree
-		proof: vector<vector<u8>>,     // vector of sibling hashes
-	): bool acquires MerkleTree {
-		assert!(exists<MerkleTree>(@dnft), error::not_found(ERESOURCE_NOT_FOUND));
+		merkle_tree: &MerkleTree,
+		leaf_hash: vector<u8>,     // this is the leaf hash that we are verifying exists in the tree
+		proof: vector<vector<u8>>, // vector of sibling hashes
+	): bool {
 		let current_hash = leaf_hash;
 		vector::for_each(proof, |sibling_hash| {
 			//assert!(vector::length(&sibling_hash) == 1 + 32, error::invalid_argument(EFLAG_NOT_PRESENT));
@@ -56,7 +51,15 @@ module dnft::merkle_tree {
 			};
 		});
 
-		(current_hash == borrow_global<MerkleTree>(@dnft).root_hash)
+		(current_hash == merkle_tree.root_hash)
+	}
+
+	public inline fun destroy(
+		merkle_tree: MerkleTree,
+	) {
+		let MerkleTree {
+			root_hash: _,
+		} = merkle_tree,
 	}
 
 	/// helper function to return the concat'd vector :p
@@ -69,11 +72,11 @@ module dnft::merkle_tree {
 	}
 
 	#[test(creator = @dnft)]
-	fun merkle_test_root_with_64k_leaves(creator: &signer,) acquires MerkleTree {
+	fun merkle_test_root_with_64k_leaves(creator: &signer,) {
 		// merkle tree initialized with sha3_256 hash in typescript using 'merkletree' package
 		// contains 64,000 leaves of values '1', to '64000'
 		let root_hash = x"81f0069a0da2699125a3cb308546d98af07784329a7e5424f603e236b59f0f28";
-		init_merkle_tree(creator, root_hash);
+		let merkle_tree = new(root_hash);
 
 		// when leaf == '1', this is our proof. generated with typescript
 		let leaf_hash = x"eda84fb0563b2d2c1c189edb24c673d7d662446093f2ec1fc0a604093123ff57";
@@ -97,16 +100,17 @@ module dnft::merkle_tree {
 		];
 
 		assert!(leaf_hash == hash::sha3_256(b"Leaf #1"), 0);
-		verify_proof(leaf_hash, proof);
+		verify_proof(&merkle_tree, leaf_hash, proof);
+		destroy(merkle_tree);
 	}
 
 
 	#[test(creator = @dnft)]
-	fun merkle_test_multiple_proofs(creator: &signer,) acquires MerkleTree {
+	fun merkle_test_multiple_proofs(creator: &signer,) {
 		// merkle tree initialized with sha3_256 hash in typescript using 'merkletree' package
 		// contains 64 leaves of values '1', to '64'
 		let root_hash = x"79089f39012cf1fa0f9643f782c29126672519c566f18aa95bec0336857d210b";
-		init_merkle_tree(creator, root_hash);
+		let merkle_tree = new(root_hash);
 
 		// when leaf == '1', this is our proof. generated with typescript
 		let leaf_hash = x"67b176705b46206614219f47a05aee7ae6a3edbe850bbbe214c536b989aea4d2";
@@ -119,7 +123,7 @@ module dnft::merkle_tree {
 			x"0156b5fe77286fa17588798731eec05a91f7cc9f12624e8d60938ee667629fa306",
 			x"017e94024d4d6a5d9a4a968ea04fdb729dd29161ec682423d2da91923b869a5f1e",
 		];
-		assert!(verify_proof(leaf_hash, proof), 1);
+		assert!(verify_proof(&merkle_tree, leaf_hash, proof), 1);
 
 
 		// when leaf == '17', this is our proof. generated with typescript
@@ -133,7 +137,7 @@ module dnft::merkle_tree {
 			x"0156b5fe77286fa17588798731eec05a91f7cc9f12624e8d60938ee667629fa306",
 			x"017e94024d4d6a5d9a4a968ea04fdb729dd29161ec682423d2da91923b869a5f1e",
 		];
-		assert!(verify_proof(leaf_hash, proof), 3);
+		assert!(verify_proof(&merkle_tree, leaf_hash, proof), 3);
 
 
 		// when leaf == '16', this is our proof. generated with typescript
@@ -147,7 +151,7 @@ module dnft::merkle_tree {
 			x"0156b5fe77286fa17588798731eec05a91f7cc9f12624e8d60938ee667629fa306",
 			x"017e94024d4d6a5d9a4a968ea04fdb729dd29161ec682423d2da91923b869a5f1e",
 		];
-		assert!(verify_proof(leaf_hash, proof), 5);
+		assert!(verify_proof(&merkle_tree, leaf_hash, proof), 5);
 
 
 		// when leaf == '32', this is our proof. generated with typescript
@@ -161,7 +165,7 @@ module dnft::merkle_tree {
 			x"00f33378adf419718ff39a8f89b6150119ae6bdbbb2161fc6fdd7ad176c2763be5",
 			x"017e94024d4d6a5d9a4a968ea04fdb729dd29161ec682423d2da91923b869a5f1e",
 		];
-		assert!(verify_proof(leaf_hash, proof), 7);
+		assert!(verify_proof(&merkle_tree, leaf_hash, proof), 7);
 
 
 		// when leaf == '64', this is our proof. generated with typescript
@@ -175,8 +179,9 @@ module dnft::merkle_tree {
 			x"00a98994829b5e9d1eda998ee53ea1dcfe946313e26198f8b2ae8df4cddcefef26",
 			x"0032779c0c1da1bb75a128c4392e9353f1f89bd465fb5bb614d906302e11db4791",
 		];
-		assert!(verify_proof(leaf_hash, proof), 9);
+		assert!(verify_proof(&merkle_tree, leaf_hash, proof), 9);
 
+		destroy(merkle_tree);
 	}
 
 

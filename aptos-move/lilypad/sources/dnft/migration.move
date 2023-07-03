@@ -10,6 +10,7 @@ module pond::migration {
    use aptos_token_objects::collection::{Self, Collection, MutatorRef as CollectionMutatorRef};
    use std::string::{utf8 as str, String};
    use pond::lilypad::{internal_get_resource_signer_and_addr};
+   use pond::merkle_tree::{Self, MerkleTree};
 
    const COLLECTION_NAME: vector<u8> = b"Aptos Toad Overload";
    const CREATOR_ADDRESS: address = @resource_creator_addr;
@@ -41,6 +42,7 @@ module pond::migration {
       extend_ref: ExtendRef,
       transfer_ref: TransferRef,
       mutator_ref: CollectionMutatorRef,
+      merkle_tree: MerkleTree,
    }
 
    struct ToadStore has key {
@@ -56,9 +58,10 @@ module pond::migration {
       new_royalty_numerator: u64,
       new_royalty_denominator: u64,
       treasury_address: address,
-   ): ConstructorRef acquires CollectionV2Config {
+      root_hash: vector<u8>,
+   ) acquires CollectionV2Config {
       let creator_addr = signer::address_of(creator);
-      lilypad::assert_lilypad_exists(creator_address);
+      lilypad::assert_lilypad_exists(creator_addr);
       // ensures the original collection exists (and is, by implication, owned by `creator`)
       token::check_collection_exists(creator_addr, v1_collection_name);
 
@@ -85,6 +88,8 @@ module pond::migration {
       let mutator_ref = collection::generate_mutator_ref(&collection_constructor_ref);
 
       // store misc info in collection config for bookkeeping as well as the collection object refs
+      // this also creates & stores the merkle tree root hash, which is our validator for
+      // image URLs created from a hash of the concatenation of all `TRAIT_TYPE::TRAIT_NAME`s
       move_to(
          creator,
          CollectionV2Config {
@@ -96,11 +101,9 @@ module pond::migration {
             extend_ref: extend_ref,
             transfer_ref: transfer_ref,
             mutator_ref: mutator_ref,
+            merkle_tree: merkle_tree::new(root_hash),
          }
       );
-
-      // lastly, initialize all trait images
-      toad_v2::initialize_trait_images(creator);
    }
 
    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -113,58 +116,40 @@ module pond::migration {
    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-   public fun swap_v1_for_v2(
-      toad_owner: &signer,
+   /// gets all the trait types and trait names from a toad in its property map
+   /// and creates a v2 toad from it. Transfers the toad to the owner after creation
+   /// and stores the v1 toad into a simple resource that holds it indefinitely. (would burn if could)
+   /// tracks the # migrated and unmigrated to avoid potential backdoors
+   public entry fun swap_v1_for_v2(
+      owner: &signer,
       toad_name: String,
-      creator_address: address,
+      creator_addr: address,
       collection_name: String,
+      unvalidated_image_uri: String,
    ) {
-      let (token, keys, values) = extract_generic_v1_toad_and_traits(
-         toad_owner,
-         toad_name,
-         creator_address,
-         collection_name
-      );
+      let (v1_token, keys, values) =
+         extract_generic_v1_toad_and_traits(owner, toad_name, creator_addr, collection_name);
 
-      let (resource_signer, resource_addr) = lilypad::internal_get_resource_signer_and_addr(creator_address);
-
-      store_v1_and_create_v2(
-         resource_signer,
-         resource_addr,
-         toad_owner,
-         token,
-         keys,
-         values,
-      );
-
-      increment_migrated_and_decrement_unmigrated(resource_addr);
-   }
-
-   fun store_v1_and_create_v2(
-      resource_signer: &signer,
-      resource_addr: address,
-      toad_owner: &signer,
-      token: Token,
-      keys: vector<String>,
-      values: vector<String>,
-   ) acquires CollectionV2Config {
+      let (resource_signer, resource_addr) = lilypad::internal_get_resource_signer_and_addr(creator_addr);
       let collection_object = borrow_global<CollectionV2Config>(resource_addr).v2_collection_object;
+
       // create v2 version
-      let (token_constructor_ref, aptoad_object) = toad_v2::create_from_v1(
+      let aptoad_object = toad_v2::create_v2_from_v1(
          resource_signer,
          resource_addr,
          collection_object,
-         token,
+         v1_token,
          keys,
-         values
+         values,
+         unvalidated_image_uri,
       );
 
-      // transfer
-      let owner_addr = signer::address_of(toad_owner);
+      let owner_addr = signer::address_of(owner);
       object::transfer(resource_signer, aptoad_object, owner_addr);
 
-      // store v1 toad
-      store_toad(token);
+      store_toad(v1_token);
+
+      increment_migrated_and_decrement_unmigrated(resource_addr);
    }
 
    fun increment_migrated_and_decrement_unmigrated(
@@ -198,27 +183,27 @@ module pond::migration {
    }
 
    public fun extract_v1_toad_and_traits(
-      toad_owner: &signer,
+      owner: &signer,
       toad_name: String,
    ): (Token, vector<String>, vector<String>) {
-      let owner_addr = signer::address_of(toad_owner);
+      let owner_addr = signer::address_of(owner);
       let token_id = create_nft_token_id(CREATOR_ADDRESS, str(COLLECTION_NAME), toad_name);
       assert!(token::balance_of(owner_addr, token_id) == 1, error::permission_denied(ENOT_OWNER));
-      let token = token::withdraw_token(toad_owner, token_id, 1);
+      let token = token::withdraw_token(owner, token_id, 1);
       let (keys, values) = get_keys_and_values(owner_addr, token_id);
       (token, keys, values)
    }
 
    public fun extract_generic_v1_toad_and_traits(
-      toad_owner: &signer,
+      owner: &signer,
       toad_name: String,
-      creator_address: address,
+      creator_addr: address,
       collection_name: String,
    ): (Token, vector<String>, vector<String>) {
-      let owner_addr = signer::address_of(toad_owner);
-      let token_id = create_nft_token_id(creator_address, collection_name, toad_name);
+      let owner_addr = signer::address_of(owner);
+      let token_id = create_nft_token_id(creator_addr, collection_name, toad_name);
       assert!(token::balance_of(owner_addr, token_id) == 1, error::permission_denied(ENOT_OWNER));
-      let token = token::withdraw_token(toad_owner, token_id, 1);
+      let token = token::withdraw_token(owner, token_id, 1);
       let (keys, values) = get_keys_and_values(owner_addr, token_id);
       (token, keys, values)
    }
@@ -297,10 +282,10 @@ module pond::migration {
    public fun view_generic_pmap(
       toad_name: String,
       owner_address: address,
-      creator_address: address,
+      creator_addr: address,
       collection_name: String,
    ): (vector<String>, vector<String>) {
-      let token_id = create_nft_token_id(creator_address, collection_name, toad_name);
+      let token_id = create_nft_token_id(creator_addr, collection_name, toad_name);
       get_keys_and_values(owner_address, token_id)
    }
 
@@ -308,14 +293,14 @@ module pond::migration {
    public fun view_generic_pmap_and_uri(
       toad_name: String,
       owner_address: address,
-      creator_address: address,
+      creator_addr: address,
       collection_name: String,
    ): (vector<String>, vector<String>, String) {
-      let token_data_id = token::create_token_data_id(creator_address, collection_name, toad_name);
-      let property_version = token::get_tokendata_largest_property_version(creator_address, token_data_id);
+      let token_data_id = token::create_token_data_id(creator_addr, collection_name, toad_name);
+      let property_version = token::get_tokendata_largest_property_version(creator_addr, token_data_id);
       let token_id = token::create_token_id(token_data_id, property_version);
       
-      let token_uri = token::get_tokendata_uri(creator_address, token_data_id);
+      let token_uri = token::get_tokendata_uri(creator_addr, token_data_id);
       let (keys, values) = get_keys_and_values(owner_address, token_id);
       (keys, values, token_uri)
    }
