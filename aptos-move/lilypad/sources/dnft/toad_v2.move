@@ -63,11 +63,13 @@ module pond::toad_v2 {
     const MOUTH: vector<u8> = b"Mouth";
     const FLY: vector<u8> = b"Fly";
 
-    /// Action not authorized because the signer is not the owner of this module
-    const ENOT_AUTHORIZED: u64 = 1;
-    /// That type doesn't exist on the object
+    /// Action not authorized because the signer is not the owner of this module.
+    const ENOT_AUTHORIZED: u64 = 0;
+    /// Action not authorized because the signer is not the owner of the object.
+    const ENOT_OWNER: u64 = 1;
+    /// That type doesn't exist on the object.
     const ENOT_A_VALID_OBJECT: u64 = 2;
-    /// That trait type doesn't exist on the object
+    /// That trait type doesn't exist on the object.
     const EINVALID_TRAIT_TYPE: u64 = 3;
     /// There is no background trait on the original token.
     const ENO_BACKGROUND_TRAIT: u64 = 4;
@@ -231,19 +233,25 @@ module pond::toad_v2 {
         (perfect)
     }
 
+    /// transfer the object from the toad object to its owner and set `allow_ungated_transfer`
     fun internal_transfer<T>(
         trait_obj: Object<T>,
         to: address,
+        allow_ungated_transfer: bool,
     ) {
-        let linear_transfer_ref = get_linear_transfer_ref(trait_obj);
-        object::transfer_with_ref(linear_transfer_ref, to);
-    }
-
-    fun get_linear_transfer_ref<T>(
-        trait_obj: Object<T>,
-    ): LinearTransferRef acquires Clothing, Headwear, Eyewear, Mouth Fly {
+        assert!(object::is_owner(trait_obj, to), error::permission_denied(ENOT_OWNER));
         assert!(exists<Refs>(object::object_address(trait_obj)), error::invalid_state(EOBJECT_DOES_NOT_HAVE_REFS));
-        object::generate_linear_transfer_ref(&borrow_global<Refs>(object_address).transfer_ref)
+
+        let transfer_ref = &borrow_global<Refs>(object_address).transfer_ref;
+
+        if (allow_ungated_transfer) {
+            object::enable_ungated_transfer(transfer_ref);
+        } else {
+            object::disable_ungated_transfer(transfer_ref);
+        };
+
+        let linear_transfer_ref = object::generate_linear_transfer_ref(transfer_ref);
+        object::transfer_with_ref(linear_transfer_ref);
     }
 
     /// stores the refs and returns the signer for convenience
@@ -408,16 +416,17 @@ module pond::toad_v2 {
         assert!(!option::is_some(option_ref), error::invalid_state(ETRAIT_TYPE_ALREADY_EQUIPPED));
         option::fill<T>(option_ref, obj_to_equip);
 
-        // transfer the object from its current owner to the toad object
-        internal_transfer(obj_to_equip, toad_object);
+        let allow_ungated_transfer = false;
+        internal_transfer(obj_to_equip, toad_object, allow_ungated_transfer);
     }
 
     inline fun only_unequip_trait<T: key>(
         toad_object: Object<Aptoad>,
     ) {
         let obj_to_unequip = get_trait_object_from_toad<T>(toad_object);
-        // transfer the object from the toad object to its owner
-        internal_transfer(object::owner(toad_object), obj_to_unequip);
+
+        let allow_ungated_transfer = true;
+        internal_transfer(object::owner(toad_object), obj_to_unequip, allow_ungated_transfer);
     }
 
     /// this should only be run after any change has taken place
