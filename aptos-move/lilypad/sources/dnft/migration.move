@@ -11,6 +11,7 @@ module pond::migration {
    use std::string::{utf8 as str, String};
    use pond::lilypad::{internal_get_resource_signer_and_addr};
    use pond::merkle_tree::{Self, MerkleTree};
+   use pond::lilypad::{add_creator_addr_to_resource_signer};
 
    const COLLECTION_NAME: vector<u8> = b"Aptos Toad Overload";
    const CREATOR_ADDRESS: address = @resource_creator_addr;
@@ -104,6 +105,9 @@ module pond::migration {
             merkle_tree: merkle_tree::new(root_hash),
          }
       );
+
+      // add the creator_addr to the resource address so we can obtain it easily
+      add_creator_addr_to_resource_signer(creator);
    }
 
    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////

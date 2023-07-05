@@ -11,6 +11,10 @@ module pond::toad_v2 {
     use std::vector;
     use std::signer;
     use std::hash;
+    use std::error;
+    use std::event::{Self, EventHandle};
+    friend pond::migration;
+    //use pond::lilypad::{internal_get_resource_signer_and_addr};
 
     #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
     struct Aptoad has key {
@@ -22,7 +26,6 @@ module pond::toad_v2 {
         mouth: Option<Object<Mouth>>,
         fly: Option<Object<Fly>>,
         perfect: bool,
-        event_handle: 
     }
 
     #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
@@ -45,8 +48,8 @@ module pond::toad_v2 {
 
     #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
     struct EventHandles has key {
-        equip_event: EventHandle<EquipEvent>,
-        unequip_event: EventHandle<UnequipEvent>,
+        equip_events: EventHandle<EquipEvent>,
+        unequip_events: EventHandle<UnequipEvent>,
         migration_events: EventHandle<MigrationEvent>,
     }
 
@@ -213,18 +216,19 @@ module pond::toad_v2 {
         // of the transaction drastically. The image_uri is assumed to be unchanged and valid since I've
         // never changed them.
         // TODO: Remove this:
-        verified_uri_update(trait_map, base_toad_object, unvalidated_image_uri, proof);
+        let leaf_hash = verified_uri_update(trait_map, base_toad_object, unvalidated_image_uri, proof);
 
         // image_uri is now verified
         let validated_image_uri = unvalidated_image_uri;
 
+        // I just realized if I disallow clones then some people won't be able to migrate if someone else
+        // migrates and equips/unequips first.
+        // I think I need to create all 4,000 UniqueCombination objects before the migration
+        
+
         // NOTE: Sanity check
         // TODO: Remove later
         assert!(validated_image_uri == token_uri, error::invalid_state(EIMAGE_URIS_DONT_MATCH));
-
-        // TODO: Add token v1 => v2 swap event emission here!
-        // TODO: Add token v1 => v2 swap event emission here!
-        // TODO: Add token v1 => v2 swap event emission here!
     }
 
     fun initialize_event_store(
@@ -261,15 +265,15 @@ module pond::toad_v2 {
             } else if (k == str(BODY)) {
                 body = v;
             } else if (k == str(CLOTHING)) {
-                only_equip_trait(base_toad_object, create_trait<Clothing>(resource_signer, v));
+                equip_trait(base_toad_object, create_trait<Clothing>(resource_signer, v));
             } else if (k == str(HEADWEAR)) {
-                only_equip_trait(base_toad_object, create_trait<Headwear>(resource_signer, v));
+                equip_trait(base_toad_object, create_trait<Headwear>(resource_signer, v));
             } else if (k == str(EYEWEAR)) {
-                only_equip_trait(base_toad_object, create_trait<Eyewear>(resource_signer, v));
+                equip_trait(base_toad_object, create_trait<Eyewear>(resource_signer, v));
             } else if (k == str(MOUTH)) {
-                only_equip_trait(base_toad_object, create_trait<Mouth>(resource_signer, v));
+                equip_trait(base_toad_object, create_trait<Mouth>(resource_signer, v));
             } else if (k == str(FLY)) {
-                only_equip_trait(base_toad_object, create_trait<Fly>(resource_signer, v));
+                equip_trait(base_toad_object, create_trait<Fly>(resource_signer, v));
             } else {
                 // do nothing, could throw an error here to be extra safe...ok I'll do it.
                 error::invalid_state(EINVALID_PROPERTY_MAP_KEY);
@@ -305,16 +309,16 @@ module pond::toad_v2 {
     }
 
     /// stores the refs and returns the signer for convenience
-    fun store_refs(constructor_ref: &ConstructorRef): &signer {
+    inline fun store_refs(constructor_ref: &ConstructorRef): &signer {
         // get refs and token_signer for storing later
         let transfer_ref = object::generate_transfer_ref(&constructor_ref);
         let extend_ref = object::generate_extend_ref(&constructor_ref);
         let mutator_ref = token_v2::generate_mutator_ref(&constructor_ref);
-        let token_signer = object::generate_signer(&constructor_ref);
+        let object_signer = object::generate_signer(&constructor_ref);
 
         // store refs
         move_to(
-            &token_signer,
+            &object_signer,
             Refs {
                 transfer_ref,
                 extend_ref,
@@ -322,7 +326,7 @@ module pond::toad_v2 {
             }
         );
 
-        token_signer
+        object_signer
     }
 
     fun create_trait_base_token<T>(
@@ -400,7 +404,7 @@ module pond::toad_v2 {
 
 
         // make the change before creating the trait map
-        only_equip_trait<T>(toad_object, obj_to_equip);
+        equip_trait<T>(toad_object, obj_to_equip);
         
         // create the new trait map
         let new_trait_map = get_v2_trait_map(toad_object);
@@ -411,6 +415,12 @@ module pond::toad_v2 {
         // gate the trait equip/unequip by paying with $FLY or something?
         // can also gate/disallow clones here. would use hash
         // also run checks either here or in `verified_uri_update`
+
+        // NOTE: We do this here and not in `equip_trait` because otherwise the migration function would call this
+        // 5 times (and it would fail because the Aptoad would only have 1 trait on the first equip)
+        trait_combo::try_unique_combination(
+
+        )
     }
 
     /// intended to only be used by the singular equip
@@ -423,7 +433,7 @@ module pond::toad_v2 {
         assert!(exists<Aptoad>(toad_object), error::invalid_argument(ENOT_A_TOAD));
 
         // make the change before creating the trait map
-        only_unequip_trait<T>(toad_object);
+        unequip_trait<T>(toad_object);
         
         // create the new trait map
         let new_trait_map = get_v2_trait_map(toad_object);
@@ -437,7 +447,7 @@ module pond::toad_v2 {
     }
 
     /// intended to be used by both v1 => v2 creator and future equips/unequips
-    inline fun only_equip_trait<T: key>(
+    inline fun equip_trait<T: key>(
         toad_object: Object<Aptoad>,
         obj_to_equip: Object<T>
     ) acquires Aptoad, Clothing, Headwear, Eyewear, Mouth, Fly {
@@ -476,7 +486,7 @@ module pond::toad_v2 {
         internal_transfer(obj_to_equip, toad_object, allow_ungated_transfer);
     }
 
-    inline fun only_unequip_trait<T: key>(
+    inline fun unequip_trait<T: key>(
         toad_object: Object<Aptoad>,
     ) {
         let obj_to_unequip = get_trait_object_from_toad<T>(toad_object);
@@ -509,14 +519,18 @@ module pond::toad_v2 {
         obj_addr: address,
         image_uri: String,
         proof: vector<vector<u8>>,
-    ) acquires Refs {
+    ): vector<u8> acquires Refs {
         verify_num_traits(new_trait_map);
 
-        assert_trait_combo_in_merkle(new_trait_map, image_uri, proof);
+        let leaf_hash = assert_trait_combo_in_merkle(new_trait_map, image_uri, proof);
+        // assert_trait_combo_in_merkle(new_trait_map, image_uri, proof);
         assert!(exists<Refs>(obj_addr), error::not_found(EREFS_NOT_FOUND));
         let ref_resources = borrow_global<Refs>(obj_addr);
         let mutator_ref = &ref_resources.mutator_ref;
         token_v2::set_uri(mutator_ref, image_uri);
+
+        // combo_object call
+        leaf_hash
     }
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -765,7 +779,7 @@ module pond::toad_v2 {
         trait_map: &SimpleMap<String, String>,
         image_uri: String,
         proof: vector<vector<u8>>,
-    ): {
+    ): vector<u8> {
         let concatenated_traits = join_traits(&trait_map, str(DELIMITER));
         let concatenated_trait_and_url = join_strings(concatenated_traits, concatenated_trait_and_url);
         let concatenated_trait_string = to_upper(concatenated_trait_and_url);
@@ -780,6 +794,10 @@ module pond::toad_v2 {
             proof
         );
         assert!(is_valid_proof, error::invalid_argument(EINVALID_PROOF));
+
+
+        std::debug::print(&concatenated_trait_string);
+        internally_verified_leaf_hash
     }
 
 

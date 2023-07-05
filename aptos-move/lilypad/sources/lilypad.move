@@ -1,40 +1,42 @@
 module pond::lilypad {
-    use std::option::{Self};
-    use std::string::{String};
-	 use std::string::bytes;
-	 use std::error;
-    use aptos_std::table::{Self, Table};
-    //use aptos_token::property_map::{Self, PropertyMap};
-	 use pond::iterable_table::{Self, IterableTable};
-	 use std::vector;
-    use std::signer;
-    use aptos_framework::account::{Self, SignerCapability};
-    use aptos_framework::timestamp;
-    use aptos_framework::coin;
-    use aptos_framework::event::{Self, EventHandle};
-    use aptos_std::simple_map::{Self, SimpleMap};
-    use aptos_token::token::{Self};
-	 //friend pond::migration;
+	use std::option::{Self};
+	use std::string::{String};
+	use std::string::bytes;
+	use std::error;
+	use aptos_std::table::{Self, Table};
+	//use aptos_token::property_map::{Self, PropertyMap};
+	use pond::iterable_table::{Self, IterableTable};
+	use std::vector;
+	use std::signer;
+	use aptos_framework::account::{Self, SignerCapability};
+	use aptos_framework::timestamp;
+	use aptos_framework::coin;
+	use aptos_framework::event::{Self, EventHandle};
+	use aptos_std::simple_map::{Self, SimpleMap};
+	use aptos_token::token::{Self};
+	friend pond::migration;
+	friend pond::toad_v2;
+	friend pond::trait_combo;
 
-    const MILLI_CONVERSION_FACTOR: u64 = 1000;
-    const MICRO_CONVERSION_FACTOR: u64 = 1000000;
-	 const IS_MAXIMUM_MUTABLE: bool = false;
+	const MILLI_CONVERSION_FACTOR: u64 = 1000;
+	const MICRO_CONVERSION_FACTOR: u64 = 1000000;
+	const IS_MAXIMUM_MUTABLE: bool = false;
 
-	 const BASIC_MINT: u64 = 0;
-	 const WHITELIST_MINT: u64 = 1;
-	 const VIP_MINT: u64 = 2;
-	 const CLAIM_MINT: u64 = 3;
+	const BASIC_MINT: u64 = 0;
+	const WHITELIST_MINT: u64 = 1;
+	const VIP_MINT: u64 = 2;
+	const CLAIM_MINT: u64 = 3;
 
-	 const U64_MAX: u64 = 18446744073709551615;
+	const U64_MAX: u64 = 18446744073709551615;
 
-	 const MAX_MINTS_PER_TX: u64 = 100;
-	 const MAX_MINTS_PER_WHITELIST_USER: u64 = 3;
-	 const MAX_VIP_MINTS: u64 = 210;
+	const MAX_MINTS_PER_TX: u64 = 100;
+	const MAX_MINTS_PER_WHITELIST_USER: u64 = 3;
+	const MAX_VIP_MINTS: u64 = 210;
 
 
-	 const CLAIM_AMOUNT: u64 = 1;
+	const CLAIM_AMOUNT: u64 = 1;
 
-	 const PROPERTY_MAP_STRING_TYPE: vector<u8> = b"0x1::string::String";
+	const PROPERTY_MAP_STRING_TYPE: vector<u8> = b"0x1::string::String";
 
     //const ED25519_SCHEME: u8 = 0;
 
@@ -117,6 +119,10 @@ module pond::lilypad {
     const 			  				  		  			YOU_SHOULDNT_BE_HERE:  u64 = 75;	/* 0x4b */
     const 			  				  		  					  OUT_OF_ORDER:  u64 = 76;	/* 0x4c */
     const 			  				  		  	 	ELILYPAD_DOES_NOT_EXIST:  u64 = 77;	/* 0x4d */
+
+	struct OriginalCreatorAddress has key {
+		creator_addr: address,
+	}
 
 	// key is the collection name
 	struct LilypadCollectionData has key {
@@ -787,6 +793,26 @@ module pond::lilypad {
 		iterable_table::add(token_mapping, token_number, token_metadata);
 
 		assert!(iterable_table::contains(token_mapping, token_number), TOKEN_METADATA_NOT_ADDED);	//redundant
+	}
+
+	public(friend) fun get_creator_addr(
+		resource_address: address,
+	) acquires OriginalCreatorAddress {
+		borrow_global<OriginalCreatorAddress>(resource_address).creator_addr
+	}
+
+	// it's difficult to go backwards from resource address => creator, so let's just store it on the resource
+	public(friend) fun add_creator_addr_to_resource_signer(
+		creator: &signer,
+	) acquires LilypadCollectionData {
+		let creator_addr = signer::address_of(creator);
+		let (resource_signer, resource_address) = internal_get_resource_signer_and_addr(creator_addr);
+		move_to(
+			&resource_signer,
+			OriginalCreatorAddress {
+				creator_addr,
+			}
+		);
 	}
 
 	//	NEVER make this publicentry!!!!!
