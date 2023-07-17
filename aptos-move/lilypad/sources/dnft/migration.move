@@ -8,10 +8,11 @@ module pond::migration {
    use aptos_token::property_map;
    use aptos_token::token::{Self, Token, TokenId};
    use aptos_token_objects::collection::{Self, Collection, MutatorRef as CollectionMutatorRef};
+   use aptos_token_objects::royalty::{Self, Royalty};
    use std::string::{utf8 as str, String};
-   use pond::lilypad::{internal_get_resource_signer_and_addr};
+   use pond::lilypad::{internal_get_resource_signer_and_addr, add_creator_addr_to_resource_signer};
+   use pond::trait_combo::{is_ready_for_migration};
    use pond::merkle_tree::{Self, MerkleTree};
-   use pond::lilypad::{add_creator_addr_to_resource_signer};
 
    const COLLECTION_NAME: vector<u8> = b"Aptos Toad Overload";
    const CREATOR_ADDRESS: address = @resource_creator_addr;
@@ -33,8 +34,10 @@ module pond::migration {
    const EMAXIMUM_DOES_NOT_MATCH: u64 = 3;
    /// Migrated vs unmigrated tokens are out of sync. The amount of both should sum to 4,000.
    const ESUPPLY_OUT_OF_SYNC: u64 = 4;
+   /// Provided vector lengths do not match.
+   const EVECTOR_LENGTHS_DO_NOT_MATCH: u64 = 5;
 
-   struct CollectionV2Config has key {
+   struct ToadCollectionConfig has key {
       unmigrated_v1_tokens: u64,
       migrated_v1_tokens: u64,
       v1_collection: String,
@@ -46,6 +49,14 @@ module pond::migration {
       merkle_tree: MerkleTree,
    }
 
+   struct TraitCollectionConfig has key {
+      v2_collection: String,
+      v2_collection_object: Object<Collection>,
+      extend_ref: ExtendRef,
+      transfer_ref: TransferRef,
+      mutator_ref: CollectionMutatorRef,
+   }
+
    struct ToadStore has key {
       inner: Table<TokenId, Token>,
    }
@@ -53,52 +64,63 @@ module pond::migration {
    public fun initialize_v2_collection(
       creator: &signer,
       v1_collection_name: String,
-      v2_collection_uri: String,
       v2_collection_name: String,
       v2_collection_description: String,
+      v2_collection_uri: String,
       new_royalty_numerator: u64,
       new_royalty_denominator: u64,
       treasury_address: address,
       root_hash: vector<u8>,
-   ) acquires CollectionV2Config {
+      v2_trait_collection_name: String,
+      v2_trait_collection_description: String,
+      v2_trait_collection_uri: String,
+      v2_trait_types: vector<String>,
+      v2_trait_names: vector<String>,
+      v2_trait_symbols: vector<String>,
+      v2_trait_uris: vector<String>,
+   ) acquires ToadCollectionConfig {
       let creator_addr = signer::address_of(creator);
       lilypad::assert_lilypad_exists(creator_addr);
-      // ensures the original collection exists (and is, by implication, owned by `creator`)
-      token::check_collection_exists(creator_addr, v1_collection_name);
+      let (resource_signer, resource_addr) = internal_get_resource_signer_and_addr(creator_addr);
+
+      // ensures the original collection exists (and is, by implication, owned by `resource_signer`)
+      token::check_collection_exists(resource_addr, v1_collection_name);
 
       // check maximums and supplies
-      let maximum = *option::extract(token::get_collection_maximum(creator_addr, v1_collection_name));
-      let supply = *option::extract(token::get_collection_supply(creator_addr, v1_collection_name));
+      let maximum = *option::extract(token::get_collection_maximum(resource_addr, v1_collection_name));
+      let supply = *option::extract(token::get_collection_supply(resource_addr, v1_collection_name));
       assert!(maximum == supply, error::invalid_state(EMAX_NOT_SUPPLY));
       assert!(maximum == MAXIMUM_SUPPLY, error::invalid_state(EMAXIMUM_DOES_NOT_MATCH));
 
+      let royalty_obj = royalty::create(new_royalty_numerator, new_royalty_denominator, treasury_address);
+
       // create the collection & get its constructor ref
-      let collection_constructor_ref = collection::create_fixed_collection(
-         creator,
+      let toad_collection_constructor_ref = collection::create_fixed_collection(
+         &resource_signer,
          v2_collection_description,
          MAXIMUM_SUPPLY,
          v2_collection_name,
-         royalty::create(new_royalty_numerator, new_royalty_denominator, treasury_address),
+         royalty_obj,
          v2_collection_uri,
       );
 
       // create object reference and refs from constructor_ref
-      let collection_object = object::object_from_constructor_ref<Collection>(&collection_constructor_ref);
-      let extend_ref = object::generate_extend_ref(&collection_constructor_ref);
-      let transfer_ref = object::generate_transfer_ref(&collection_constructor_ref);
-      let mutator_ref = collection::generate_mutator_ref(&collection_constructor_ref);
+      let toad_collection_object = object::object_from_constructor_ref<Collection>(&toad_collection_constructor_ref);
+      let extend_ref = object::generate_extend_ref(&toad_collection_constructor_ref);
+      let transfer_ref = object::generate_transfer_ref(&toad_collection_constructor_ref);
+      let mutator_ref = collection::generate_mutator_ref(&toad_collection_constructor_ref);
 
       // store misc info in collection config for bookkeeping as well as the collection object refs
       // this also creates & stores the merkle tree root hash, which is our validator for
       // image URLs created from a hash of the concatenation of all `TRAIT_TYPE::TRAIT_NAME`s
       move_to(
-         creator,
-         CollectionV2Config {
+         &resource_signer,
+         ToadCollectionConfig {
             unmigrated_v1_tokens: MAXIMUM_SUPPLY,
             migrated_v1_tokens: 0,
             v1_collection: v1_collection_name,
             v2_collection: v2_collection_name,
-            v2_collection_object: collection_object,
+            v2_collection_object: toad_collection_object,
             extend_ref: extend_ref,
             transfer_ref: transfer_ref,
             mutator_ref: mutator_ref,
@@ -108,6 +130,103 @@ module pond::migration {
 
       // add the creator_addr to the resource address so we can obtain it easily
       add_creator_addr_to_resource_signer(creator);
+
+      let trait_collection_constructor_ref = initialize_trait_collection(
+         resource_signer,
+         v2_trait_collection_name,
+         v2_trait_collection_description,
+         v2_trait_collection_uri,
+         royalty_obj,
+      );
+
+      let trait_collection_object = object::object_from_constructor_ref<Collection>(&trait_collection_constructor_ref);
+
+      create_base_traits(
+         resource_signer,
+         resource_addr,
+         trait_collection_object,
+         v2_trait_types,
+         v2_trait_names,
+         v2_trait_symbols,
+         v2_trait_uris,
+      );
+
+      trait_combo::is_ready_for_migration(resource_addr, v1_collection_name, v2_collection_name);
+   }
+
+   fun create_base_traits(
+      resource_signer: &signer,
+      resource_addr: address,
+      trait_collection_object: Object<Collection>,
+      v2_trait_types: vector<String>,
+      v2_trait_names: vector<String>,
+      v2_trait_symbols: vector<String>,
+      v2_trait_uris: vector<String>,
+   ) {
+      assert!(
+         vector::length(&v2_trait_types) == 
+         vector::length(&v2_trait_names) == 
+         vector::length(&v2_trait_symbols) == 
+         vector::length(&v2_trait_uris),
+         error::invalid_argument(EVECTOR_LENGTHS_DO_NOT_MATCH)
+      );
+
+      vector::reverse(&mut v2_trait_types);
+      vector::reverse(&mut v2_trait_names);
+      vector::reverse(&mut v2_trait_symbols);
+      vector::reverse(&mut v2_trait_uris);
+      while(vector::length(&v2_trait_types) > 0) {
+         let trait_type = vector::pop_back(&mut v2_trait_types);
+         let trait_name = vector::pop_back(&mut v2_trait_names);
+         let trait_symbol = vector::pop_back(&mut v2_trait_symbols);
+         let trait_uri = vector::pop_back(&mut v2_trait_uris);
+         toad_v2::create_base_fungible_trait(
+            resource_signer,
+            resource_addr,
+            trait_collection_object,
+            trait_type,
+            trait_name,
+            trait_symbol,
+            trait_uri
+         );
+      };
+   }
+
+   fun initialize_trait_collection(
+      resource_signer: &signer,
+      v2_trait_collection_name: String,
+      v2_trait_collection_description: String,
+      v2_trait_collection_uri: String,
+      royalty_obj: Object<Royalty>,
+   ): &ConstructorRef {
+       // create the collection & get its constructor ref
+      let collection_constructor_ref = collection::create_unlimited_collection(
+         &resource_signer,
+         v2_trait_collection_description,
+         v2_trait_collection_name,
+         royalty_obj,
+         v2_trait_collection_uri,
+      );
+
+      // create object reference and refs from constructor_ref
+      let collection_object = object::object_from_constructor_ref<Collection>(&collection_constructor_ref);
+      let extend_ref = object::generate_extend_ref(&collection_constructor_ref);
+      let transfer_ref = object::generate_transfer_ref(&collection_constructor_ref);
+      let mutator_ref = collection::generate_mutator_ref(&collection_constructor_ref);
+
+      // store misc info in collection config for bookkeeping as well as the collection object refs
+      move_to(
+         &resource_signer,
+         TraitCollectionConfig {
+            v2_collection: String,
+            v2_collection_object: Object<Collection>,
+            extend_ref: ExtendRef,
+            transfer_ref: TransferRef,
+            mutator_ref: CollectionMutatorRef,
+         }
+      );
+
+      &collection_constructor_ref
    }
 
    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -135,7 +254,7 @@ module pond::migration {
          extract_generic_v1_toad_and_traits(owner, toad_name, creator_addr, collection_name);
 
       let (resource_signer, resource_addr) = lilypad::internal_get_resource_signer_and_addr(creator_addr);
-      let collection_object = borrow_global<CollectionV2Config>(resource_addr).v2_collection_object;
+      let collection_object = borrow_global<ToadCollectionConfig>(resource_addr).v2_collection_object;
 
       // create v2 version
       let aptoad_object = toad_v2::create_v2_toad(
@@ -158,8 +277,8 @@ module pond::migration {
 
    fun increment_migrated_and_decrement_unmigrated(
       resource_addr: address,
-   ) acquires CollectionV2Config {
-      let collection_v2_config = borrow_global_mut<CollectionV2Config>(resource_addr);
+   ) acquires ToadCollectionConfig {
+      let collection_v2_config = borrow_global_mut<ToadCollectionConfig>(resource_addr);
       *collection_v2_config.unmigrated_v1_tokens = *collection_v2_config.unmigrated_v1_tokens - 1;
       *collection_v2_config.migrated_v1_tokens = *collection_v2_config.migrated_v1_tokens + 1;
       assert!(*collection_v2_config.migrated_v1_tokens + *collection_v2_config.unmigrated_v1_tokens == MAXIMUM_SUPPLY,

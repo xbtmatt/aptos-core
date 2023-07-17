@@ -8,6 +8,7 @@ module pond::toad_v2 {
     use std::option::{Self, Option};
     use aptos_std::string_utils;
     use aptos_std::type_info;
+    use aptos_std::primary_fungible_store;
     use std::vector;
     use std::signer;
     use std::hash;
@@ -26,6 +27,7 @@ module pond::toad_v2 {
         mouth: Option<Object<Mouth>>,
         fly: Option<Object<Fly>>,
         perfect: bool,
+        unique_combination_obj: Object<UniqueCombination>,
     }
 
     #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
@@ -51,6 +53,7 @@ module pond::toad_v2 {
         equip_events: EventHandle<EquipEvent>,
         unequip_events: EventHandle<UnequipEvent>,
         migration_events: EventHandle<MigrationEvent>,
+        new_combination_events: EventHandle<NewCombinationEvent>,
     }
 
     struct EquipEvent has copy, drop, store {
@@ -71,6 +74,23 @@ module pond::toad_v2 {
         new_token_name: String,
         toad_object: Object<Aptoad>,
         perfect: bool,
+    }
+
+    struct NewCombinationEvent has copy, drop, store {
+        toad_obj: Object<Aptoad>,
+        owner_addr: address,
+        background: String,
+        body: String,
+        clothing: String,
+        headwear: String,
+        eyewear: String,
+        mouth: String,
+        fly: String,
+        clothing_obj: Option<Object<Clothing>>,
+        headwear_obj: Option<Object<Headwear>>,
+        eyewear_obj: Option<Object<Eyewear>>,
+        mouth_obj: Option<Object<Mouth>>,
+        fly_obj: Option<Object<Fly>>,
     }
 
     const LOWER_TO_UPPER_ASCII_DIFFERENCE: u64 = 32;
@@ -128,6 +148,10 @@ module pond::toad_v2 {
     const ENOT_PERFECT_TOAD: u64 = 14;
     /// Each Aptoad must have at least 2 and no more than 7 traits.
     const EINVALID_NUMBER_OF_TRAITS_AFTER_UPDATE: u64 = 15;
+    /// The Aptoad does not own the Combo object.
+    const ETOAD_DOES_NOT_OWN_COMBO: u64 = 16;
+    /// That trait type token already exists.
+    const ETRAIT_TYPE_ALREADY_EXISTS: u64 = 17;
 
 
     // TODO: Remove later, this is purely for a sanity check
@@ -189,6 +213,20 @@ module pond::toad_v2 {
             perfect,
         );
         
+        // NOTE: These are redundant. We can remove these because they will likely change the gas cost
+        // of the transaction drastically. The image_uri is assumed to be unchanged and valid since I've
+        // never changed them.
+        // TODO: Remove this:
+        let leaf_hash = verified_uri_update(trait_map, base_toad_object, unvalidated_image_uri, proof);
+        // image_uri is now verified
+        let validated_image_uri = unvalidated_image_uri;
+        // Sanity check. TODO: Remove later.
+        assert!(validated_image_uri == token_uri, error::invalid_state(EIMAGE_URIS_DONT_MATCH));
+
+        let unique_combination_obj = trait_combo::get_address(resource_addr, leaf_hash);
+        assert!(exists<UniqueCombination>(unique_combination_obj),
+            error::invalid_state(EUNIQUE_COMBINATION_DOES_NOT_EXIST));
+
         move_to(
             token_signer,
             Aptoad {
@@ -200,7 +238,17 @@ module pond::toad_v2 {
                 mouth: option::none<Object<Mouth>>(),
                 fly: option::none<Object<Fly>>(),
                 perfect: is_perfect,
+                unique_combination_obj,
             }
+        );
+
+        let abort_if_exists = true;
+        try_unique_combination(
+            leaf_hash,
+            validated_image_uri,
+            resource_addr,
+            base_toad_object,
+            abort_if_exists,
         );
 
         let is_verified_perfect = create_v2_traits(
@@ -212,23 +260,6 @@ module pond::toad_v2 {
             values
         );
 
-        // NOTE: These are redundant. We can remove these because they will likely change the gas cost
-        // of the transaction drastically. The image_uri is assumed to be unchanged and valid since I've
-        // never changed them.
-        // TODO: Remove this:
-        let leaf_hash = verified_uri_update(trait_map, base_toad_object, unvalidated_image_uri, proof);
-
-        // image_uri is now verified
-        let validated_image_uri = unvalidated_image_uri;
-
-        // I just realized if I disallow clones then some people won't be able to migrate if someone else
-        // migrates and equips/unequips first.
-        // I think I need to create all 4,000 UniqueCombination objects before the migration
-        
-
-        // NOTE: Sanity check
-        // TODO: Remove later
-        assert!(validated_image_uri == token_uri, error::invalid_state(EIMAGE_URIS_DONT_MATCH));
     }
 
     fun initialize_event_store(
@@ -240,6 +271,7 @@ module pond::toad_v2 {
                 equip_event: event::new_event_handle<EquipEvent>(token_signer),
                 unequip_event: event::new_event_handle<UnequipEvent>(token_signer),
                 migration_events: event::new_event_handle<MigrationEvent>(token_signer),
+                new_combination_events: event::new_event_handle<NewCombinationEvent>(token_signer),
             }
         );
     }
@@ -265,15 +297,15 @@ module pond::toad_v2 {
             } else if (k == str(BODY)) {
                 body = v;
             } else if (k == str(CLOTHING)) {
-                equip_trait(base_toad_object, create_trait<Clothing>(resource_signer, v));
+                equip_trait(base_toad_object, mint_trait<Clothing>(resource_signer, v));
             } else if (k == str(HEADWEAR)) {
-                equip_trait(base_toad_object, create_trait<Headwear>(resource_signer, v));
+                equip_trait(base_toad_object, mint_trait<Headwear>(resource_signer, v));
             } else if (k == str(EYEWEAR)) {
-                equip_trait(base_toad_object, create_trait<Eyewear>(resource_signer, v));
+                equip_trait(base_toad_object, mint_trait<Eyewear>(resource_signer, v));
             } else if (k == str(MOUTH)) {
-                equip_trait(base_toad_object, create_trait<Mouth>(resource_signer, v));
+                equip_trait(base_toad_object, mint_trait<Mouth>(resource_signer, v));
             } else if (k == str(FLY)) {
-                equip_trait(base_toad_object, create_trait<Fly>(resource_signer, v));
+                equip_trait(base_toad_object, mint_trait<Fly>(resource_signer, v));
             } else {
                 // do nothing, could throw an error here to be extra safe...ok I'll do it.
                 error::invalid_state(EINVALID_PROPERTY_MAP_KEY);
@@ -329,35 +361,58 @@ module pond::toad_v2 {
         object_signer
     }
 
-    fun create_trait_base_token<T>(
+    fun create_base_fungible_trait<T>(
         resource_signer: &signer,
         resource_addr: address,
         collection_object: Object<Collection>,
         trait_type: String,
         trait_name: String,
+        symbol: String,
         image_uri: String,
     ): ConstructorRef {
-        let trait_map = simple_map::new_from(
-            vector<String> [ trait_type ],
-            vector<String> [ trait_name ]
+        let collection_name = collection_v2::name(collection_object);
+        let token_address = create_token_address(
+            resource_addr,
+            &collection_name,
+            trait_name
         );
-        let num_traits = get_num_traits_and_run_basic_check(&trait_map);
-        assert_trait_combo_in_merkle(&trait_map);
+        assert!(!exists<Object>(token_address), error::invalid_state(ETRAIT_TYPE_ALREADY_EXISTS));
 
-        // note this only works because we don't have repeated trait names. If we did we'd need to do smth else
         let constructor_ref = token_v2::create_named_token(
             resource_signer,
-            collection_v2::name(collection_object),
+            collection_name,
             get_trait_description(trait_type, trait_name),
             trait_name,
             option::none(), // using collection wide royalties
             image_uri,
         );
 
+        primary_fungible_store::create_primary_store_enabled_fungible_asset(
+            &constructor_ref,
+            option::none<u128>(),
+            trait_name,
+            symbol,
+            0,
+            image_uri,
+            collection_v2::uri(collection_object),
+        );
+
+        if (trait_type == trait_type_to_string<Clothing>()) {
+            move_to(&token_signer, Clothing { });
+        } else if (trait_type == trait_type_to_string<Headwear>()) {
+            move_to(&token_signer, Headwear { });
+        } else if (trait_type == trait_type_to_string<Eyewear>()) {
+            move_to(&token_signer, Eyewear { });
+        } else if (trait_type == trait_type_to_string<Mouth>()) {
+            move_to(&token_signer, Mouth { });
+        } else if (trait_type == trait_type_to_string<Fly>()) {
+            move_to(&token_signer, Fly { });
+        };
+
         store_refs(&constructor_ref);
     }
 
-    fun create_trait<T>(
+    fun mint_trait<T>(
         resource_signer: &signer,
         resource_addr: address,
         collection_object: Object<Collection>,
@@ -391,12 +446,16 @@ module pond::toad_v2 {
     /// intended to only be used by the singular equip
     /// this function will fail if there isn't a valid slot to equip
     public entry fun equip_and_update<T: key>(
+        owner: &signer,
         toad_object: Object<Aptoad>,
         obj_to_equip: Object<T>,
         unvalidated_image_uri: String,
         proof: vector<vector<u8>>,
     ) acquires Aptoad, Clothing, Headwear, Eyewear, Mouth, Fly {
         assert!(exists<Aptoad>(toad_object), error::invalid_argument(ENOT_A_TOAD));
+        let owner_addr = signer::address_of(owner);
+        assert!(object::is_owner(toad_object, owner_addr), error::permission_denied(ENOT_OWNER));
+        assert!(object::is_owner(obj_to_equip, owner_addr), error::permission_denied(ENOT_OWNER));
         assert!(exists<T>(obj_to_equip), error::invalid_argument(EINVALID_TRAIT_TYPE));
         // may have to use this if the compiler gets mad at the previous line
         // TODO: Remove this or remove above
@@ -410,27 +469,54 @@ module pond::toad_v2 {
         let new_trait_map = get_v2_trait_map(toad_object);
 
         // runs all checks to ensure the state of the toad is valid post-change
-        verified_uri_update(new_trait_map, base_toad_object, unvalidated_image_uri, proof);
+        let leaf_hash = 
+            verified_uri_update(new_trait_map, base_toad_object, unvalidated_image_uri, proof);
+        let validated_image_uri = unvalidated_image_uri;
 
         // gate the trait equip/unequip by paying with $FLY or something?
-        // can also gate/disallow clones here. would use hash
-        // also run checks either here or in `verified_uri_update`
 
         // NOTE: We do this here and not in `equip_trait` because otherwise the migration function would call this
         // 5 times (and it would fail because the Aptoad would only have 1 trait on the first equip)
-        trait_combo::try_unique_combination(
+        let abort_if_exists = false;
+        try_unique_combination(
+            leaf_hash,
+            validated_image_uri,
+            token_v2::creator(toad_object),
+            toad_object,
+            abort_if_exists,
+        );
 
-        )
+        let (background, body, clothing, headwear, eyewear, mouth, fly) = 
+
+        emit_new_combination_event(
+            internal_get_aptoad_signer(toad_object),
+            owner_addr,
+            get_background(toad_object),
+            get_body(toad_object),
+            get_trait_name_from_toad<Clothing>(toad_object),
+            get_trait_name_from_toad<Headwear>(toad_object),
+            get_trait_name_from_toad<Eyewear>(toad_object),
+            get_trait_name_from_toad<Mouth>(toad_object),
+            get_trait_name_from_toad<Fly>(toad_object),
+            get_trait_option_from_toad<Clothing>(toad_object),
+            get_trait_option_from_toad<Headwear>(toad_object),
+            get_trait_option_from_toad<Eyewear>(toad_object),
+            get_trait_option_from_toad<Mouth>(toad_object),
+            get_trait_option_from_toad<Fly>(toad_object),
+        );
     }
 
     /// intended to only be used by the singular equip
     /// this function will fail if there isn't a valid slot to unequip
     public entry fun unequip_and_update<T: key>(
+        owner: &signer,
         toad_object: Object<Aptoad>,
         unvalidated_image_uri: String,
         proof: vector<vector<u8>>,
     ) acquires Aptoad, Clothing, Headwear, Eyewear, Mouth, Fly {
         assert!(exists<Aptoad>(toad_object), error::invalid_argument(ENOT_A_TOAD));
+        let owner_addr = signer::address_of(owner);
+        assert!(object::is_owner(toad_object, owner_addr), error::permission_denied(ENOT_OWNER));
 
         // make the change before creating the trait map
         unequip_trait<T>(toad_object);
@@ -439,11 +525,41 @@ module pond::toad_v2 {
         let new_trait_map = get_v2_trait_map(toad_object);
 
         // runs all checks to ensure the state of the toad is valid post-change
-        verified_uri_update(new_trait_map, base_toad_object, unvalidated_image_uri, proof);
+        let leaf_hash = 
+            verified_uri_update(new_trait_map, base_toad_object, unvalidated_image_uri, proof);
+        let validated_image_uri = unvalidated_image_uri;
 
         // gate the trait equip/unequip by paying with $FLY or something?
-        // can also gate/disallow clones here. would use hash
-        // also run checks either here or in `verified_uri_update`
+
+        // NOTE: We do this here and not in `equip_trait` because otherwise the migration function would call this
+        // 5 times (and it would fail because the Aptoad would only have 1 trait on the first equip)
+        let abort_if_exists = false;
+        try_unique_combination(
+            leaf_hash,
+            validated_image_uri,
+            token_v2::creator(toad_object),
+            toad_object,
+            abort_if_exists,
+        );
+
+        let (background, body, clothing, headwear, eyewear, mouth, fly) = 
+
+        emit_new_combination_event(
+            internal_get_aptoad_signer(toad_object),
+            owner_addr,
+            get_background(toad_object),
+            get_body(toad_object),
+            get_trait_name_from_toad<Clothing>(toad_object),
+            get_trait_name_from_toad<Headwear>(toad_object),
+            get_trait_name_from_toad<Eyewear>(toad_object),
+            get_trait_name_from_toad<Mouth>(toad_object),
+            get_trait_name_from_toad<Fly>(toad_object),
+            get_trait_option_from_toad<Clothing>(toad_object),
+            get_trait_option_from_toad<Headwear>(toad_object),
+            get_trait_option_from_toad<Eyewear>(toad_object),
+            get_trait_option_from_toad<Mouth>(toad_object),
+            get_trait_option_from_toad<Fly>(toad_object),
+        );
     }
 
     /// intended to be used by both v1 => v2 creator and future equips/unequips
@@ -531,6 +647,24 @@ module pond::toad_v2 {
 
         // combo_object call
         leaf_hash
+    }
+
+    inline fun internal_get_aptoad_signer(
+        toad_obj: Object<Aptoad>
+    ): &signer acquires Refs {
+        &generate_signer_for_extending(&borrow_global<Refs>(toad_obj).extend_ref)
+    }
+
+    /// Merely keeps the combo object field in the Aptoad object up to date with its owner
+    /// This cannot be abused because the owner is verified.
+    public fun set_unique_combination(
+        toad_obj: Object<Aptoad>,
+        new_combo_object: Object<UniqueCombination>
+    ) acquires Aptoad {
+        assert!(object::is_owner(new_combo_object, toad_obj), error::invalid_state(ETOAD_DOES_NOT_OWN_COMBO));
+        // TODO: Remove, should be redundant
+        assert!(exists_at<Aptoad>(toad_obj), error::not_found(ENOT_A_TOAD));
+        *&borrow_global_mut<Aptoad>(toad_obj).unique_combination_obj = new_combo_object;
     }
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -705,6 +839,12 @@ module pond::toad_v2 {
         if (is_mouth(obj))    { str(MOUTH) } else
         if (is_fly(obj))      { str(FLY) } else
         { error::invalid_argument(EINVALID_TRAIT_TYPE) }
+    }
+
+    #[view]
+    public fun get_unique_combination(toad_obj: Object<Aptoad>): Object<UniqueCombination> acquires Aptoad{
+        assert!(exists_at<Aptoad>(toad_obj), error::not_found(ENOT_A_TOAD));
+        &borrow_global<Aptoad>(aptoad).unique_combination_obj
     }
 
     /*
@@ -911,6 +1051,46 @@ module pond::toad_v2 {
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    /// Emits a new combination event from the Aptoad Token Object
+    inline fun emit_new_combination_event(
+        token_signer: &signer,
+        owner_addr: address,
+        background: String,
+        body: String,
+        clothing: String,
+        headwear: String,
+        eyewear: String,
+        mouth: String,
+        fly: String,
+        clothing_obj: Option<Object<Clothing>>,
+        headwear_obj: Option<Object<Headwear>>,
+        eyewear_obj: Option<Object<Eyewear>>,
+        mouth_obj: Option<Object<Mouth>>,
+        fly_obj: Option<Object<Fly>>,
+    ) acquires EventHandles {
+        let event_handles = borrow_global_mut<EventHandles>(signer::address_of(token_signer));
+        event::emit_event(
+            &mut event_handles.new_combination_events,
+            NewCombinationEvent {
+                signer::address_of(token_signer),
+                old_collection_name,
+                owner_addr,
+                background,
+                body,
+                clothing,
+                headwear,
+                eyewear,
+                mouth,
+                fly,
+                clothing_obj,
+                headwear_obj,
+                eyewear_obj,
+                mouth_obj,
+                fly_obj,
+            }
+        );
+    }
 
     inline fun emit_migration_event(
         token_signer: &signer,

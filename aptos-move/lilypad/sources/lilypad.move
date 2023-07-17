@@ -207,7 +207,7 @@ module pond::lilypad {
 	public entry fun assert_lilypad_exists(
 		creator_address: address,
 	) {
-		assert!(exists<StaticTokenMetadata>(creator_address), error::not_found(ELILYPAD_DOES_NOT_EXIST));
+		assert!(exists<LilypadCollectionData>(creator_address), error::not_found(ELILYPAD_DOES_NOT_EXIST));
 	}
 
 	public entry fun initialize_lilypad<CoinType>(
@@ -815,9 +815,6 @@ module pond::lilypad {
 		);
 	}
 
-	//	NEVER make this publicentry!!!!!
-	//	NEVER make this publicentry!!!!!
-	// you could potentially give access to signers' collections if this is publicly exposed
 	public(friend) fun internal_get_resource_signer_and_addr(
 		creator_addr: address,
 		//collection_name: String,
