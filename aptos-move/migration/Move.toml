@@ -1,0 +1,17 @@
+[package]
+name = "Migration Tool"
+version = "0.0.0"
+
+[addresses]
+std = "0x1"
+aptos_std = "0x1"
+aptos_framework = "0x1"
+aptos_token = "0x3"
+token_v2 = "0x4"
+
+[dependencies]
+MoveStdlib = { local = "../framework/move-stdlib" }
+AptosFramework = { local = "../framework/aptos-framework" }
+AptosToken = { local = "../framework/aptos-token" }
+AptosTokenObjects = { local = "../framework/aptos-token-objects" }
+DataStructure = { local = "../move-examples/data_structures" }
