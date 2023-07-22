@@ -1,17 +1,23 @@
 module migration::migration_tool {
     use std::object::{Self, Object, ExtendRef, TransferRef, DeleteRef};
-    use std::string::{Self, String, utf8 as str};
+    use std::string::{String, utf8 as str};
     use std::error;
     use std::signer;
-    use aptos_token_objects::aptos_token::{Self as no_code_token};
+    use aptos_token_objects::aptos_token::{Self as no_code_token};//, AptosCollection};
     //use aptos_token_objects::token::{Self as token_v2, Token as TokenObject};
     use aptos_token_objects::collection::{Self as collection_v2, Collection};//, CollectionObject};
-    use aptos_token::token::{Self as token_v1};
+    use aptos_token::token::{Self as token_v1, TokenId, Token as TokenV1};
     use migration::token_utils::{Self};
     use migration::package_manager::{Self};
+    use std::table::{Self, Table};
+    use std::vector;
 
     /// There is no migration config at the given address.
     const ECONFIG_NOT_FOUND: u64 = 0;
+    /// You are not the owner of the token.
+    const ENOT_TOKEN_OWNER: u64 = 1;
+    /// The token store does not exist.
+    const ETOKEN_STORE_DOES_NOT_EXIST: u64 = 2;
 
     const MIGRATION_CONFIG: vector<u8> = b"migration_config";
 
@@ -25,6 +31,10 @@ module migration::migration_tool {
         extend_ref: ExtendRef,
         transfer_ref: TransferRef,
         delete_ref: DeleteRef,
+    }
+
+    struct TokenStore has key {
+        inner: Table<TokenId, TokenV1>,
     }
 
     public entry fun create_migration_config_from_token(
@@ -67,7 +77,7 @@ module migration::migration_tool {
         royalty_denominator: u64,          // collection wide
     ) {
         let seed_str = std::string_utils::format2(&b"{}::{}", collection_name, str(MIGRATION_CONFIG));
-        let constructor_ref = object::create_named_object(creator, *string::bytes(&seed_str));
+        let constructor_ref = object::create_object_from_account(creator);
         let obj_address = object::address_from_constructor_ref(&constructor_ref);
         let obj_signer = object::generate_signer(&constructor_ref);
 
@@ -97,7 +107,7 @@ module migration::migration_tool {
             royalty_denominator,
         );
 
-        let collection_object_address = collection_v2::create_collection_address(&creator_address, &collection_name);
+        let collection_object_address = collection_v2::create_collection_address(&obj_address, &collection_name);
 
         move_to(
             &obj_signer,
@@ -110,10 +120,16 @@ module migration::migration_tool {
                 delete_ref: object::generate_delete_ref(&constructor_ref),
             },
         );
+
+        move_to(
+            &obj_signer,
+            TokenStore {
+                inner: table::new<TokenId, TokenV1>(),
+            }
+        )
     }
 
-    #[view]
-    public fun get_migration_signer_from_creator(
+    fun get_migration_signer_from_creator(
         creator: &signer,
         collection_name: String,
     ): signer acquires MigrationConfig {
@@ -133,7 +149,7 @@ module migration::migration_tool {
     }
 
     #[view]
-    public inline fun get_seed_str(
+    public fun get_seed_str(
         creator: address,
         collection_name: String,
     ): String {
@@ -146,6 +162,87 @@ module migration::migration_tool {
     ): signer acquires MigrationConfig {
         assert!(exists<MigrationConfig>(obj_addr), error::not_found(ECONFIG_NOT_FOUND));
         object::generate_signer_for_extending(&borrow_global<MigrationConfig>(obj_addr).extend_ref)
+    }
+
+    //////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////
+    ///////////////////   SWAP FUNCTIONS   ///////////////////
+    //////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////
+
+    public entry fun migrate_v1_to_v2(
+        owner: &signer,
+        creator_address: address,
+        collection_name: String,
+        token_name: String,
+        keys: vector<String>,
+    ) acquires MigrationConfig, TokenStore {
+        let token_v1_data = token_utils::get_token_v1_data(creator_address, collection_name, token_name, keys);
+        let token_id = token_utils::get_token_id(&token_v1_data);
+
+        let owner_address = signer::address_of(owner);
+        assert!(token_v1::balance_of(owner_address, token_id) == 1, error::permission_denied(ENOT_TOKEN_OWNER));
+
+        let (values, types, _, _, _) = token_utils::view_property_map_values_and_types(owner_address, creator_address, collection_name, token_name, keys);
+        let token = token_v1::withdraw_token(owner, token_id, 1);
+
+        let config_obj_addr = get_config_address(creator_address, collection_name);
+        let obj_signer = internal_get_migration_signer(config_obj_addr);
+
+        let bcs_serialized_values: vector<vector<u8>> = vector::map(values, |value| {
+            std::bcs::to_bytes(&value)
+        });
+
+        let token_creation_num = std::account::get_guid_next_creation_num(config_obj_addr);
+        no_code_token::mint(
+            &obj_signer,
+            collection_name,
+            token_utils::get_token_description(&token_v1_data),
+            token_name,
+            token_utils::get_token_uri(&token_v1_data),
+            keys,
+            types,
+            bcs_serialized_values,
+        );
+
+        store_token(
+            &obj_signer,
+            token
+        );
+
+        let token_address = object::create_guid_object_address(config_obj_addr, token_creation_num);
+
+        // this doesn't work becuase it's trying to transfer the config object
+        // we want to transfer the no_code_token token, but idek how to get the address for it...?
+
+        // OK so I tried create_guid_obj_address but......forgot that since the object itself is the creator, and i created with named object creation, i dont think it has a GUID._
+        // very confusing and frustrating, will have to think about this from devex perspective.
+        object::transfer_call(&obj_signer, token_address, owner_address);
+    }
+
+    fun store_token(
+        obj_signer: &signer,
+        token: TokenV1,
+    ) acquires TokenStore {
+        let obj_addr = signer::address_of(obj_signer);
+        assert!(exists<TokenStore>(obj_addr), error::invalid_state(ETOKEN_STORE_DOES_NOT_EXIST));
+        let token_store = borrow_global_mut<TokenStore>(obj_addr);
+        table::add(&mut token_store.inner, token_v1::get_token_id(&token), token);
+    }
+
+    #[view]
+    public fun token_balance(
+        owner: address,
+        creator_address: address,
+        collection_name: String,
+        token_name: String,
+        keys: vector<String>,
+    ): u64 {
+        let token_v1_data = token_utils::get_token_v1_data(creator_address, collection_name, token_name, keys);
+        let token_id = token_utils::get_token_id(&token_v1_data);
+        token_v1::balance_of(owner, token_id)
     }
 
 }

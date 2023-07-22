@@ -41,7 +41,7 @@ module migration::token_utils {
         name: String,
         mutability_config: TokenMutabilityConfig,
         property_keys: vector<String>,
-        property_values: vector<vector<u8>>,
+        property_values: vector<String>,
         property_types: vector<String>,
         burnable_by_creator: Option<bool>,
         burnable_by_owner: Option<bool>,
@@ -127,7 +127,7 @@ module migration::token_utils {
         collection_name: String,
         token_name: String,
         keys: vector<String>,
-    ): (vector<vector<u8>>, vector<String>, Option<bool>, Option<bool>, Option<bool>) {
+    ): (vector<String>, vector<String>, Option<bool>, Option<bool>, Option<bool>) {
         let token_data_id = token_v1::create_token_data_id(creator_address, collection_name, token_name);
         let token_id = assert_and_create_nft_token_id(creator_address, token_data_id);
         get_property_map_values_and_types(owner_address, token_id, keys)
@@ -139,7 +139,7 @@ module migration::token_utils {
         owner_address: address,
         token_id: TokenId,
         keys: vector<String>,
-    ): (vector<vector<u8>>, vector<String>, Option<bool>, Option<bool>, Option<bool>) {
+    ): (vector<String>, vector<String>, Option<bool>, Option<bool>, Option<bool>) {
         let property_map = token_v1::get_property_map(owner_address, token_id);
         let property_map_length = property_map::length(&property_map);
 
@@ -150,13 +150,13 @@ module migration::token_utils {
 
         assert!(vector::length(&keys) == property_map_length, error::invalid_argument(ENUM_KEYS_INCORRECT));
 
-        let values = vector<vector<u8>> [];
+        let values = vector<String> [];
         let types = vector<String> [];
 
         vector::for_each(keys, |k| {
             assert!(property_map::contains_key(&property_map, &k), error::invalid_argument(EKEY_NOT_FOUND));
             let property_value = property_map::borrow(&property_map, &k);
-            let v = property_map::borrow_value(property_value);
+            let v = str(b"asdfkjf");//property_map::read_string(&property_map, &k);//std::from_bcs::to_string(property_map::borrow_value(property_value));
             let t = property_map::borrow_type(property_value);
 
             vector::push_back(&mut values, v);
@@ -236,20 +236,32 @@ module migration::token_utils {
     public fun get_token_property_keys(token_data_v1: &TokenDataV1): vector<String> {
         token_data_v1.property_keys
     }
-    public fun get_token_property_values(token_data_v1: &TokenDataV1): vector<vector<u8>> {
+    public fun get_token_property_values(token_data_v1: &TokenDataV1): vector<String> {
         token_data_v1.property_values
     }
     public fun get_token_property_types(token_data_v1: &TokenDataV1): vector<String> {
         token_data_v1.property_types
     }
     public fun get_token_burnable_by_creator(token_data_v1: TokenDataV1): bool {
-        option::extract(&mut token_data_v1.burnable_by_creator)
+        if (option::is_some(&token_data_v1.burnable_by_creator)) {
+            option::extract(&mut token_data_v1.burnable_by_creator)
+        } else {
+            false
+        }
     }
     public fun get_token_burnable_by_owner(token_data_v1: TokenDataV1): bool {
-        option::extract(&mut token_data_v1.burnable_by_owner)
+        if (option::is_some(&token_data_v1.burnable_by_owner)) {
+            option::extract(&mut token_data_v1.burnable_by_owner)
+        } else {
+            false
+        }
     }
     public fun get_token_property_mutable(token_data_v1: TokenDataV1): bool {
-        option::extract(&mut token_data_v1.token_property_mutable)
+        if (option::is_some(&token_data_v1.token_property_mutable)) {
+            option::extract(&mut token_data_v1.token_property_mutable)
+        } else {
+            false
+        }
     }
     public fun get_token_burnable_by_creator_option(token_data_v1: &TokenDataV1): Option<bool> {
         token_data_v1.burnable_by_creator

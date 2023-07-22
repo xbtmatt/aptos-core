@@ -1,0 +1,28 @@
+{
+  "function_id": "0x3::token::create_collection_script",
+  "type_args": [],
+  "args": [
+    {
+      "type": "string",
+      "value": "Collection1"
+    },
+    {
+      "type": "string",
+      "value": "description"
+    },
+    {
+      "type": "string",
+      "value": "uri"
+    },
+    {
+      "type": "u64",
+      "value": "100"
+    },
+    {
+      "type": "bool",
+      "value": [
+        true, true, true
+      ]
+    }
+  ]
+}

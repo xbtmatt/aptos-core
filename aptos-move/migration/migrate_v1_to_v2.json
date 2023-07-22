@@ -1,0 +1,22 @@
+{
+  "function_id": "c91394ead7f723b518c9b0f57c010a19fb40361b1b717f6d5f05df7c28f2b8b9::migration_tool::migrate_v1_to_v2",
+  "type_args": [],
+  "args": [
+    {
+      "type": "address",
+      "value": "0xb7c22590e1532069403c2a721bcf31d1a45fc3acd7c12903b3cf0fe23f486411"
+    },
+    {
+      "type": "string",
+      "value": "Collection1"
+    },
+    {
+      "type": "string",
+      "value": "token name 3333"
+    },
+    {
+      "type": "string",
+      "value": ["name", "description", "uri", "symbol", "supply"]
+    }
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "function_id": "0x3::token::create_token_script",
+  "type_args": [],
+  "args": [
+    {
+      "type": "string",
+      "value": "Collection1"
+    },
+    {
+      "type": "string",
+      "value": "token name 3333"
+    },
+    {
+      "type": "string",
+      "value": "description"
+    },
+    {
+      "type": "u64",
+      "value": "1"
+    },
+    {
+      "type": "u64",
+      "value": "1"
+    },
+    {
+      "type": "string",
+      "value": "uri"
+    },
+    {
+      "type": "address",
+      "value": "0x1"
+    },
+    {
+      "type": "u64",
+      "value": "5115"
+    },
+    {
+      "type": "u64",
+      "value": "513"
+    },
+    {
+      "type": "bool",
+      "value": ["true", "true", "true", "true", "true"]
+    },
+    {
+      "type": "string",
+      "value": ["name", "description", "uri", "symbol", "supply"]
+    },
+    {
+      "type": "u8",
+      "value": [
+        ["1"],
+        ["1", "2"],
+        ["1", "2", "3"],
+        ["1", "2", "3", "4"],
+        ["1", "2", "3", "4", "5"]
+      ]
+    },
+    {
+      "type": "string",
+      "value": ["0x1::string::String", "0x1::string::String", "0x1::string::String", "0x1::string::String", "0x1::string::String"]
+    }
+  ]
+}
