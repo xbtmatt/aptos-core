@@ -8,6 +8,12 @@ aptos_std = "0x1"
 aptos_framework = "0x1"
 aptos_token = "0x3"
 aptos_token_objects = "0x4"
+deployer = "_"
+migration = "_"
+
+[dev-addresses]
+deployer = "0xfa"
+migration = "0xd1850fc9d733223f88f44f7788523bfe77d5d9257d3bbf3437d783474ac67f26"
 
 [dependencies]
 MoveStdlib = { local = "../framework/move-stdlib" }

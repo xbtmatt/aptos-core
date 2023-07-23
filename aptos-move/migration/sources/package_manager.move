@@ -8,6 +8,7 @@ module migration::package_manager {
     use std::signer;
 
     friend migration::migration_tool;
+    friend migration::unit_tests;
 
     /// You are not authorized to upgrade this module.
     const ENOT_AUTHORIZED: u64 = 0;
@@ -63,5 +64,10 @@ module migration::package_manager {
 
     inline fun safe_permission_config(): &PermissionConfig acquires PermissionConfig {
         borrow_global<PermissionConfig>(@migration)
+    }
+
+    #[test_only]
+    public(friend) fun init_module_for_test(resource_account: &signer) {
+        init_module(resource_account);
     }
 }

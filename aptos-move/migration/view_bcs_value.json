@@ -1,0 +1,15 @@
+{
+  "function_id": "0x1ff99db63dd4ffb9d45288efea474378a12ba44f27b4fb307b16d48b306e4a8d::migration_tool::view_bcs_values",
+  "type_args": [],
+  "args": [
+    {
+      "type": "string",
+      "value": [
+        "0130",
+        "0131",
+        "0132",
+        "0133"
+      ]
+    }
+  ]
+}

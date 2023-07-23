@@ -7,7 +7,7 @@ module migration::migration_tool {
     //use aptos_token_objects::token::{Self as token_v2, Token as TokenObject};
     use aptos_token_objects::collection::{Self as collection_v2, Collection};//, CollectionObject};
     use aptos_token::token::{Self as token_v1, TokenId, Token as TokenV1};
-    use migration::token_utils::{Self};
+    use migration::token_v1_utils::{Self};
     use migration::package_manager::{Self};
     use std::table::{Self, Table};
     use std::vector;
@@ -21,18 +21,19 @@ module migration::migration_tool {
 
     const MIGRATION_CONFIG: vector<u8> = b"migration_config";
 
-
+    #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
     /// Per collection + creator combo
     /// Stores the collection specific configuration details used in migration
     struct MigrationConfig has key {
         creator: address,
         collection_v2: Object<Collection>,
-        collection_data_v1: token_utils::CollectionDataV1,
+        collection_data_v1: token_v1_utils::CollectionDataV1,
         extend_ref: ExtendRef,
         transfer_ref: TransferRef,
         delete_ref: DeleteRef,
     }
 
+    #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
     struct TokenStore has key {
         inner: Table<TokenId, TokenV1>,
     }
@@ -43,23 +44,30 @@ module migration::migration_tool {
         mutable_token_name: bool,
         tokens_freezable_by_creator: bool,
         token_name: String,
+        owner_address: address,
         keys: vector<String>,
     ) {
         let creator_address = signer::address_of(creator);
-        let token_v1_data = token_utils::get_token_v1_data(creator_address, collection_name, token_name, keys);
-        let token_mutability_config = token_utils::get_token_mutability_config(&token_v1_data);
+        let token_v1_data = token_v1_utils::get_token_v1_data(
+            creator_address,
+            owner_address,
+            collection_name,
+            token_name,
+            keys
+        );
+        let token_mutability_config = token_v1_utils::get_token_mutability_config(&token_v1_data);
         create_migration_config(
             creator,
             collection_name,
             token_v1::get_token_mutability_description(&token_mutability_config),
             token_v1::get_token_mutability_royalty(&token_mutability_config),
             mutable_token_name,
-            token_utils::get_token_property_mutable(copy token_v1_data), // TODO: Verify this is the right field, i.e., not the one within token_mutability
+            token_v1_utils::get_token_property_mutable(copy token_v1_data), // TODO: Verify this is the right field, i.e., not the one within token_mutability
             token_v1::get_token_mutability_uri(&token_mutability_config),
-            token_utils::get_token_burnable_by_creator(copy token_v1_data),
+            token_v1_utils::get_token_burnable_by_creator(copy token_v1_data),
             tokens_freezable_by_creator,
-            token_utils::get_token_royalty_points_numerator(&token_v1_data),
-            token_utils::get_token_royalty_points_denominator(&token_v1_data),
+            token_v1_utils::get_token_royalty_points_numerator(&token_v1_data),
+            token_v1_utils::get_token_royalty_points_denominator(&token_v1_data),
         );
     }
 
@@ -76,24 +84,25 @@ module migration::migration_tool {
         royalty_numerator: u64,            // collection wide
         royalty_denominator: u64,          // collection wide
     ) {
-        let seed_str = std::string_utils::format2(&b"{}::{}", collection_name, str(MIGRATION_CONFIG));
         let constructor_ref = object::create_object_from_account(creator);
         let obj_address = object::address_from_constructor_ref(&constructor_ref);
+        std::aptos_account::create_account(obj_address);
         let obj_signer = object::generate_signer(&constructor_ref);
 
         let creator_address = signer::address_of(creator);
-        let collection_data_v1 = token_utils::get_collection_v1_data(creator_address, collection_name);
-        let full_seed_str = std::string_utils::format2(&b"{}::{}", creator_address, seed_str);
-        package_manager::add_name(full_seed_str, obj_address);
+        let collection_data_v1 = token_v1_utils::get_collection_v1_data(creator_address, collection_name);
+        package_manager::add_name(
+            get_seed_str(creator_address, collection_name),
+            obj_address
+        );
 
-
-        let collection_mutability_config = token_utils::get_collection_mutability_config(&collection_data_v1);
+        let collection_mutability_config = token_v1_utils::get_collection_mutability_config(&collection_data_v1);
         no_code_token::create_collection(
             &obj_signer,
-            token_utils::get_collection_description(&collection_data_v1),
-            token_utils::get_collection_supply(&collection_data_v1),
+            token_v1_utils::get_collection_description(&collection_data_v1),
+            token_v1_utils::get_collection_supply(&collection_data_v1),
             collection_name,
-            token_utils::get_collection_uri(&collection_data_v1),
+            token_v1_utils::get_collection_uri(&collection_data_v1),
             token_v1::get_collection_mutability_description(&collection_mutability_config),
             mutable_royalty,
             token_v1::get_collection_mutability_uri(&collection_mutability_config),
@@ -179,13 +188,19 @@ module migration::migration_tool {
         token_name: String,
         keys: vector<String>,
     ) acquires MigrationConfig, TokenStore {
-        let token_v1_data = token_utils::get_token_v1_data(creator_address, collection_name, token_name, keys);
-        let token_id = token_utils::get_token_id(&token_v1_data);
-
         let owner_address = signer::address_of(owner);
+        let token_v1_data = token_v1_utils::get_token_v1_data(
+            creator_address,
+            owner_address,
+            collection_name,
+            token_name,
+            keys
+        );
+        let token_id = token_v1_utils::get_token_id(&token_v1_data);
+
         assert!(token_v1::balance_of(owner_address, token_id) == 1, error::permission_denied(ENOT_TOKEN_OWNER));
 
-        let (values, types, _, _, _) = token_utils::view_property_map_values_and_types(owner_address, creator_address, collection_name, token_name, keys);
+        let (values, types, _, _, _) = token_v1_utils::view_property_map_values_and_types(owner_address, creator_address, collection_name, token_name, keys);
         let token = token_v1::withdraw_token(owner, token_id, 1);
 
         let config_obj_addr = get_config_address(creator_address, collection_name);
@@ -199,9 +214,9 @@ module migration::migration_tool {
         no_code_token::mint(
             &obj_signer,
             collection_name,
-            token_utils::get_token_description(&token_v1_data),
+            token_v1_utils::get_token_description(&token_v1_data),
             token_name,
-            token_utils::get_token_uri(&token_v1_data),
+            token_v1_utils::get_token_uri(&token_v1_data),
             keys,
             types,
             bcs_serialized_values,
@@ -213,12 +228,9 @@ module migration::migration_tool {
         );
 
         let token_address = object::create_guid_object_address(config_obj_addr, token_creation_num);
+        let name_for_token_lookup = create_token_lookup_string(creator_address, collection_name, token_name);
+        package_manager::add_name(name_for_token_lookup, token_address);
 
-        // this doesn't work becuase it's trying to transfer the config object
-        // we want to transfer the no_code_token token, but idek how to get the address for it...?
-
-        // OK so I tried create_guid_obj_address but......forgot that since the object itself is the creator, and i created with named object creation, i dont think it has a GUID._
-        // very confusing and frustrating, will have to think about this from devex perspective.
         object::transfer_call(&obj_signer, token_address, owner_address);
     }
 
@@ -233,16 +245,218 @@ module migration::migration_tool {
     }
 
     #[view]
+    public fun create_token_lookup_string(
+        creator_address: address,
+        collection_name: String,
+        token_name: String,
+    ): String {
+        std::string_utils::format3(&b"{}::{}::{}", creator_address, token_name, collection_name)
+    }
+
+    #[view]
+    public fun get_v2_address_from_name(
+        creator_address: address,
+        collection_name: String,
+        token_name: String,
+    ): address {
+        let name = create_token_lookup_string(creator_address, collection_name, token_name);
+        package_manager::get_name(name)
+    }
+
+    #[view]
     public fun token_balance(
-        owner: address,
+        owner_address: address,
         creator_address: address,
         collection_name: String,
         token_name: String,
         keys: vector<String>,
     ): u64 {
-        let token_v1_data = token_utils::get_token_v1_data(creator_address, collection_name, token_name, keys);
-        let token_id = token_utils::get_token_id(&token_v1_data);
-        token_v1::balance_of(owner, token_id)
+        let token_v1_data = token_v1_utils::get_token_v1_data(
+            owner_address,
+            creator_address,
+            collection_name,
+            token_name,
+            keys
+        );
+        let token_id = token_v1_utils::get_token_id(&token_v1_data);
+        token_v1::balance_of(owner_address, token_id)
     }
 
+    #[view]
+    public fun token_in_token_store(
+        creator_address: address,
+        collection_name: String,
+        token_name: String,
+    ): bool acquires TokenStore {
+        let config_addr = get_config_address(creator_address, collection_name);
+        assert!(exists<TokenStore>(config_addr), error::invalid_state(ETOKEN_STORE_DOES_NOT_EXIST));
+        let token_store = borrow_global_mut<TokenStore>(config_addr);
+        let token_data_id = token_v1::create_token_data_id(creator_address, collection_name, token_name);
+        let token_id = token_v1_utils::assert_and_create_nft_token_id(creator_address, token_data_id);
+        table::contains(&token_store.inner, token_id)
+    }
+}
+
+    //////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////
+    ///////////////////       TESTS        ///////////////////
+    //////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////
+
+module migration::unit_tests {
+    #[test_only]
+    use std::signer;
+    #[test_only]
+    use aptos_framework::account;
+    #[test_only]
+    use aptos_framework::timestamp;
+    #[test_only]
+    use migration::migration_tool;
+    #[test_only]
+    use migration::token_v1_utils;
+    #[test_only]
+    use migration::package_manager;
+    #[test_only]
+    use aptos_token::token::{Self as token_v1};
+    #[test_only]
+    use std::string::{String, utf8 as str};
+    #[test_only]
+    use std::bcs;
+    #[test_only]
+    use std::object;
+    #[test_only]
+    use aptos_token_objects::aptos_token::{AptosToken};
+
+    const COLLECTION_NAME: vector<u8> = b"Jumpy Jackrabbits";
+    const COLLECTION_DESCRIPTION: vector<u8> = b"A collection of jumpy jackrabbits!";
+    const COLLECTION_URI: vector<u8> = b"https://upload.wikimedia.org/wikipedia/commons/thumb/6/6d/Jackrabbit2_crop.JPG";
+    const TOKEN_URI: vector<u8> = b"https://upload.wikimedia.org/wikipedia/commons/thumb/6/60/Juvenile_Black-tailed_Jackrabbit_Eating.jpg";
+    const TOKEN_NAME: vector<u8> = b"Jumpy Jackrabbit #1";
+    const MAXIMUM_SUPPLY: u64 = 1000;
+
+    #[test_only]
+    fun get_property_map_keys(): vector<String> {
+        vector<String> [ str(b"key 1"),
+                         str(b"key 2"),
+                         str(b"key 3") ]
+    }
+    #[test_only]
+    fun get_property_map_values(): vector<vector<u8>> {
+        vector<vector<u8>> [ bcs::to_bytes(&str(b"value 1")),
+                             bcs::to_bytes(&str(b"value 2")),
+                             bcs::to_bytes(&str(b"value 3")) ]
+    }
+    #[test_only]
+    fun get_property_map_types(): vector<String> {
+        vector<String> [ str(b"0x1::string::String"),
+                         str(b"0x1::string::String"),
+                         str(b"0x1::string::String") ]
+    }
+
+    #[test_only]
+    fun setup_test(
+        creator: &signer,
+        resource_account: &signer,
+        migrator: &signer,
+        aptos_framework: &signer,
+    ) {
+        timestamp::set_time_has_started_for_testing(aptos_framework);
+        account::create_account_for_test(signer::address_of(creator));
+        account::create_account_for_test(signer::address_of(migrator));
+        aptos_std::resource_account::create_resource_account(creator, vector<u8>[], vector<u8>[]);
+        package_manager::init_module_for_test(resource_account);
+
+        token_v1::create_collection_script(
+            creator,
+            str(COLLECTION_NAME),
+            str(COLLECTION_DESCRIPTION),
+            str(COLLECTION_URI),
+            MAXIMUM_SUPPLY,
+            vector<bool> [true, true, true],
+        );
+    }
+
+    #[test_only]
+    fun mint_v1_token_to(
+        creator: &signer,
+        receiver: &signer,
+    ) {
+        let collection_name = str(COLLECTION_NAME);
+        let token_name = str(TOKEN_NAME);
+        token_v1::create_token_script(
+            creator,
+            collection_name,
+            token_name,
+            str(COLLECTION_DESCRIPTION),
+            1,
+            1,
+            str(b""),
+            signer::address_of(creator),
+            10,
+            1,
+            vector<bool> [true, true, true, true, true],
+            get_property_map_keys(),
+            get_property_map_values(),
+            get_property_map_types(),
+        );
+
+        let creator_address = signer::address_of(creator);
+        let token_data_id = token_v1::create_token_data_id(creator_address, collection_name, token_name);
+        let token_id = token_v1_utils::assert_and_create_nft_token_id(creator_address, token_data_id);
+        token_v1::direct_transfer(creator, receiver, token_id, 1);
+    }
+
+    #[test(creator = @deployer, resource_account = @migration, migrator = @0xbeefcafe, aptos_framework = @0x1)]
+    fun test_happy_path(
+        creator: &signer,
+        resource_account: &signer,
+        migrator: &signer,
+        aptos_framework: &signer,
+    ) {
+        setup_test(
+            creator,
+            resource_account,
+            migrator,
+            aptos_framework
+        );
+        mint_v1_token_to(creator, migrator);
+        let migrator_address = signer::address_of(migrator);
+        
+        // create the migration config
+        migration_tool::create_migration_config_from_token(
+            creator,
+            str(COLLECTION_NAME),
+            true,
+            true,
+            str(TOKEN_NAME),
+            migrator_address,
+            get_property_map_keys(),
+        );
+
+        let creator_address = signer::address_of(creator);
+        migration_tool::migrate_v1_to_v2(
+            migrator,
+            creator_address,
+            str(COLLECTION_NAME),
+            str(TOKEN_NAME),
+            get_property_map_keys(),
+        );
+
+        assert!(migration_tool::token_in_token_store(
+            creator_address,
+            str(COLLECTION_NAME),
+            str(TOKEN_NAME),
+        ), 0);
+
+        let token_object_address = migration_tool::get_v2_address_from_name(
+            creator_address,
+            str(COLLECTION_NAME),
+            str(TOKEN_NAME)
+        );
+
+        let token_obj = object::address_to_object<AptosToken>(token_object_address);
+        assert!(object::is_owner(token_obj, migrator_address), 1);
+    }
 }
