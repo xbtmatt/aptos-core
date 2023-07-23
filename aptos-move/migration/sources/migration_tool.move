@@ -4,7 +4,6 @@ module migration::migration_tool {
     use std::error;
     use std::signer;
     use aptos_token_objects::aptos_token::{Self as no_code_token};//, AptosCollection};
-    //use aptos_token_objects::token::{Self as token_v2, Token as TokenObject};
     use aptos_token_objects::collection::{Self as collection_v2, Collection};//, CollectionObject};
     use aptos_token::token::{Self as token_v1, TokenId, Token as TokenV1};
     use migration::token_v1_utils::{Self};
@@ -18,6 +17,8 @@ module migration::migration_tool {
     const ENOT_TOKEN_OWNER: u64 = 1;
     /// The token store does not exist.
     const ETOKEN_STORE_DOES_NOT_EXIST: u64 = 2;
+    /// The given signer is not the owner of the collection.
+    const ENOT_COLLECTION_OWNER: u64 = 3;
 
     const MIGRATION_CONFIG: vector<u8> = b"migration_config";
 
@@ -62,7 +63,7 @@ module migration::migration_tool {
             token_v1::get_token_mutability_description(&token_mutability_config),
             token_v1::get_token_mutability_royalty(&token_mutability_config),
             mutable_token_name,
-            token_v1_utils::get_token_property_mutable(copy token_v1_data), // TODO: Verify this is the right field, i.e., not the one within token_mutability
+            token_v1_utils::get_token_property_mutable(copy token_v1_data),
             token_v1::get_token_mutability_uri(&token_mutability_config),
             token_v1_utils::get_token_burnable_by_creator(copy token_v1_data),
             tokens_freezable_by_creator,
@@ -138,12 +139,30 @@ module migration::migration_tool {
         )
     }
 
-    fun get_migration_signer_from_creator(
+    public entry fun withdraw_aptos_coin(
+        creator: &signer,
+        collection_name: String,
+    ) acquires MigrationConfig {
+        withdraw_balance<aptos_std::aptos_coin::AptosCoin>(creator, collection_name);
+    }
+
+    public entry fun withdraw_balance<CoinType>(
+        creator: &signer,
+        collection_name: String,
+    ) acquires MigrationConfig {
+        let obj_signer = get_migration_signer(creator, collection_name);
+        let amount = aptos_std::coin::balance<CoinType>(signer::address_of(&obj_signer));
+        aptos_std::aptos_account::transfer_coins<CoinType>(&obj_signer, signer::address_of(creator), amount);
+    }
+
+    public fun get_migration_signer(
         creator: &signer,
         collection_name: String,
     ): signer acquires MigrationConfig {
-        let obj = get_config_address(signer::address_of(creator), collection_name);
-        internal_get_migration_signer(obj)
+        let config_addr = get_config_address(signer::address_of(creator), collection_name);
+        let config_obj = object::address_to_object<MigrationConfig>(config_addr);
+        assert!(object::is_owner(config_obj, signer::address_of(creator)), error::permission_denied(ENOT_COLLECTION_OWNER));
+        internal_get_migration_signer(config_addr)
     }
 
     #[view]
@@ -327,7 +346,15 @@ module migration::unit_tests {
     #[test_only]
     use std::object;
     #[test_only]
-    use aptos_token_objects::aptos_token::{AptosToken};
+    use std::option;
+    #[test_only]
+    use aptos_token_objects::aptos_token::{AptosToken, Self as no_code_token};
+    #[test_only]
+    use aptos_token_objects::token::{Self as token_v2};
+    #[test_only]
+    use aptos_token_objects::collection::{Self as collection_v2};
+    #[test_only]
+    use aptos_token_objects::royalty;
 
     const COLLECTION_NAME: vector<u8> = b"Jumpy Jackrabbits";
     const COLLECTION_DESCRIPTION: vector<u8> = b"A collection of jumpy jackrabbits!";
@@ -335,6 +362,10 @@ module migration::unit_tests {
     const TOKEN_URI: vector<u8> = b"https://upload.wikimedia.org/wikipedia/commons/thumb/6/60/Juvenile_Black-tailed_Jackrabbit_Eating.jpg";
     const TOKEN_NAME: vector<u8> = b"Jumpy Jackrabbit #1";
     const MAXIMUM_SUPPLY: u64 = 1000;
+    const MUTABLE_TOKEN_NAME: bool = true;
+    const TOKENS_FREEZABLE_BY_CREATOR: bool = true;
+    const TOKEN_MUTABILITY_CONFIG: vector<bool> = vector<bool>[false, true, false, true, false];
+    const COLLECTION_MUTABILITY_CONFIG: vector<bool> = vector<bool>[true, false, true];
 
     #[test_only]
     fun get_property_map_keys(): vector<String> {
@@ -374,7 +405,7 @@ module migration::unit_tests {
             str(COLLECTION_DESCRIPTION),
             str(COLLECTION_URI),
             MAXIMUM_SUPPLY,
-            vector<bool> [true, true, true],
+            COLLECTION_MUTABILITY_CONFIG,
         );
     }
 
@@ -396,7 +427,7 @@ module migration::unit_tests {
             signer::address_of(creator),
             10,
             1,
-            vector<bool> [true, true, true, true, true],
+            TOKEN_MUTABILITY_CONFIG,
             get_property_map_keys(),
             get_property_map_values(),
             get_property_map_types(),
@@ -422,20 +453,28 @@ module migration::unit_tests {
             aptos_framework
         );
         mint_v1_token_to(creator, migrator);
+        let creator_address = signer::address_of(creator);
         let migrator_address = signer::address_of(migrator);
+        // for use at the end of this function
+        let token_v1_data = token_v1_utils::get_token_v1_data(
+            creator_address,
+            migrator_address,
+            str(COLLECTION_NAME),
+            str(TOKEN_NAME),
+            get_property_map_keys(),
+        );
         
         // create the migration config
         migration_tool::create_migration_config_from_token(
             creator,
             str(COLLECTION_NAME),
-            true,
-            true,
+            MUTABLE_TOKEN_NAME,
+            TOKENS_FREEZABLE_BY_CREATOR,
             str(TOKEN_NAME),
             migrator_address,
             get_property_map_keys(),
         );
 
-        let creator_address = signer::address_of(creator);
         migration_tool::migrate_v1_to_v2(
             migrator,
             creator_address,
@@ -458,5 +497,77 @@ module migration::unit_tests {
 
         let token_obj = object::address_to_object<AptosToken>(token_object_address);
         assert!(object::is_owner(token_obj, migrator_address), 1);
+
+        let collection_obj = token_v2::collection_object(token_obj);
+
+        let v2_mutable_collection_description = no_code_token::is_mutable_collection_description(collection_obj);
+        let v2_mutable_collection_royalty = no_code_token::is_mutable_collection_royalty(collection_obj);
+        let v2_mutable_collection_uri = no_code_token::is_mutable_collection_uri(collection_obj);
+        let v2_mutable_token_description = no_code_token::is_mutable_description(token_obj);
+        let v2_mutable_token_name = no_code_token::is_mutable_name(token_obj);
+        let v2_mutable_token_properties = no_code_token::are_properties_mutable(token_obj);
+        let v2_mutable_token_uri = no_code_token::is_mutable_uri(token_obj);
+        let v2_tokens_burnable_by_creator = no_code_token::are_collection_tokens_burnable(collection_obj);
+        let v2_token_is_burnable = no_code_token::is_burnable(token_obj);
+        
+        let v2_tokens_freezable_by_creator = no_code_token::is_freezable_by_creator(token_obj);
+
+        let coll_mut_config = token_v1::create_collection_mutability_config(&COLLECTION_MUTABILITY_CONFIG);
+        let collection_mutability_uri = token_v1::get_collection_mutability_uri(&coll_mut_config);
+        let _collection_mutability_maximum = token_v1::get_collection_mutability_maximum(&coll_mut_config);
+        let collection_mutability_description = token_v1::get_collection_mutability_description(&coll_mut_config);
+
+        let token_mut_config = token_v1::create_token_mutability_config(&TOKEN_MUTABILITY_CONFIG);
+        assert!(coll_mut_config == token_v1::get_collection_mutability_config(creator_address, str(COLLECTION_NAME)), 2);
+        let token_data_id = token_v1::create_token_data_id(creator_address, str(COLLECTION_NAME), str(TOKEN_NAME));
+        assert!(token_mut_config == token_v1::get_tokendata_mutability_config(token_data_id), 3);
+        let _token_mutability_maximum = token_v1::get_token_mutability_maximum(&token_mut_config);
+        let token_mutability_royalty = token_v1::get_token_mutability_royalty(&token_mut_config);
+        let token_mutability_uri = token_v1::get_token_mutability_uri(&token_mut_config);
+        let token_mutability_description = token_v1::get_token_mutability_description(&token_mut_config);
+        let token_mutability_default_properties = token_v1::get_token_mutability_default_properties(&token_mut_config);
+
+        let collection_v1_data = &token_v1_utils::get_collection_v1_data(
+            creator_address,
+            str(COLLECTION_NAME),
+        );
+
+        assert!(v2_mutable_collection_description == collection_mutability_description, 1);
+        assert!(v2_mutable_collection_uri == collection_mutability_uri, 2);
+        assert!(v2_mutable_token_description == token_mutability_description, 3);
+        assert!(v2_mutable_token_name == MUTABLE_TOKEN_NAME, 4);
+        assert!(v2_tokens_burnable_by_creator == token_v1_utils::get_token_burnable_by_creator(token_v1_data), 5);
+        assert!(v2_tokens_freezable_by_creator == TOKENS_FREEZABLE_BY_CREATOR, 6);
+        assert!(v2_token_is_burnable == token_v1_utils::get_token_burnable_by_creator(token_v1_data), 7);
+        assert!(v2_mutable_token_properties == token_mutability_default_properties, 8);
+        assert!(v2_mutable_token_uri == token_mutability_uri, 9);
+
+        let _royalty_payee_address = token_v1_utils::get_token_royalty_payee_address(&token_v1_data);
+        let royalty_denominator = token_v1_utils::get_token_royalty_points_denominator(&token_v1_data);
+        let royalty_numerator = token_v1_utils::get_token_royalty_points_numerator(&token_v1_data);
+        let royalty = option::extract(&mut aptos_token_objects::royalty::get(collection_obj));
+        // can't set royalties receiver in no_code_token
+        //assert!(royalty_payee_address == royalty::payee_address(&royalty), 10);
+        assert!(royalty_numerator == royalty::numerator(&royalty), 11);
+        assert!(royalty_numerator == royalty::numerator(&royalty), 11);
+        assert!(royalty_denominator == royalty::denominator(&royalty), 12);
+        assert!(royalty_denominator == royalty::denominator(&royalty), 12);
+
+        let collection_description = token_v1_utils::get_collection_description(collection_v1_data);
+        let collection_name = token_v1_utils::get_collection_name(collection_v1_data);
+        let collection_uri = token_v1_utils::get_collection_uri(collection_v1_data);
+        let _collection_maximum = token_v1_utils::get_collection_maximum(collection_v1_data);
+        assert!(collection_v2::description(collection_obj) == collection_description, 13);
+        assert!(collection_v2::name(collection_obj) == collection_name, 14);
+        assert!(collection_v2::uri(collection_obj) == collection_uri, 15);
+
+         // No collection_v2 maximum getter yet.
+        //assert!(collection_v2::maximum(collection_obj) == collection_maximum, 16);
+
+        // based off token since we created migration script with token
+        // this would change if we did full migration config initialization (not using token, have to specify alll args)
+        assert!(v2_mutable_collection_royalty == token_mutability_royalty, 17);
+
+        migration_tool::withdraw_balance<aptos_framework::aptos_coin::AptosCoin>(creator, str(COLLECTION_NAME));
     }
 }
