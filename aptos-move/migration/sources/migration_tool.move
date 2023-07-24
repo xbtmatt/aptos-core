@@ -429,32 +429,15 @@ module migration::migration_tool {
     }
 
     #[view]
-    public fun get_v2_address_from_name(
+    /// Since we create tokens with account GUID it's difficult to retrieve them, so we store
+    /// the token addresses in package_manager and retrieve them from there.
+    public fun get_v2_token_address_from_name(
         creator_address: address,
         collection_name: String,
         token_name: String,
     ): address {
         let name = create_token_lookup_string(creator_address, collection_name, token_name);
         package_manager::get_name(name)
-    }
-
-    #[view]
-    public fun token_balance(
-        owner_address: address,
-        creator_address: address,
-        collection_name: String,
-        token_name: String,
-        keys: vector<String>,
-    ): u64 {
-        let token_v1_data = token_v1_utils::get_token_v1_data(
-            owner_address,
-            creator_address,
-            collection_name,
-            token_name,
-            keys
-        );
-        let token_id = token_v1_utils::get_token_id(&token_v1_data);
-        token_v1::balance_of(owner_address, token_id)
     }
 
     #[view]
@@ -678,7 +661,7 @@ module migration::unit_tests {
             str(COLLECTION_NAME),
         ) == 1, 0);
 
-        let token_object_address = migration_tool::get_v2_address_from_name(
+        let token_object_address = migration_tool::get_v2_token_address_from_name(
             creator_address,
             str(COLLECTION_NAME),
             str(TOKEN_NAME)
