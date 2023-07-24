@@ -53,7 +53,7 @@ module migration::package_manager {
         smart_table::add(addresses, name, object);
     }
 
-    public fun address_exists(name: String): bool acquires PermissionConfig {
+    public fun name_exists(name: String): bool acquires PermissionConfig {
         smart_table::contains(&safe_permission_config().addresses, name)
     }
 
