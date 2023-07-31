@@ -18,6 +18,7 @@ The key features are:
 -  [Constants](#@Constants_0)
 -  [Function `create_collection`](#0x4_aptos_token_create_collection)
 -  [Function `mint`](#0x4_aptos_token_mint)
+-  [Function `mint_with_address`](#0x4_aptos_token_mint_with_address)
 -  [Function `mint_soul_bound`](#0x4_aptos_token_mint_soul_bound)
 -  [Function `mint_internal`](#0x4_aptos_token_mint_internal)
 -  [Function `borrow`](#0x4_aptos_token_borrow)
@@ -370,6 +371,50 @@ With an existing collection, directly mint a viable token into the creators acco
     property_types: <a href="../../aptos-framework/../aptos-stdlib/../move-stdlib/doc/vector.md#0x1_vector">vector</a>&lt;String&gt;,
     property_values: <a href="../../aptos-framework/../aptos-stdlib/../move-stdlib/doc/vector.md#0x1_vector">vector</a>&lt;<a href="../../aptos-framework/../aptos-stdlib/../move-stdlib/doc/vector.md#0x1_vector">vector</a>&lt;u8&gt;&gt;,
 ) <b>acquires</b> <a href="aptos_token.md#0x4_aptos_token_AptosCollection">AptosCollection</a>, <a href="aptos_token.md#0x4_aptos_token_AptosToken">AptosToken</a> {
+    <a href="aptos_token.md#0x4_aptos_token_mint_with_address">mint_with_address</a>(
+        creator,
+        <a href="collection.md#0x4_collection">collection</a>,
+        description,
+        name,
+        uri,
+        property_keys,
+        property_types,
+        property_values,
+    );
+}
+</code></pre>
+
+
+
+</details>
+
+<a name="0x4_aptos_token_mint_with_address"></a>
+
+## Function `mint_with_address`
+
+With an existing collection, directly mint a viable token into the creators account.
+Identical to the mint entry function, but makes finding the created object's address easier.
+
+
+<pre><code><b>public</b> <b>fun</b> <a href="aptos_token.md#0x4_aptos_token_mint_with_address">mint_with_address</a>(creator: &<a href="../../aptos-framework/../aptos-stdlib/../move-stdlib/doc/signer.md#0x1_signer">signer</a>, <a href="collection.md#0x4_collection">collection</a>: <a href="../../aptos-framework/../aptos-stdlib/../move-stdlib/doc/string.md#0x1_string_String">string::String</a>, description: <a href="../../aptos-framework/../aptos-stdlib/../move-stdlib/doc/string.md#0x1_string_String">string::String</a>, name: <a href="../../aptos-framework/../aptos-stdlib/../move-stdlib/doc/string.md#0x1_string_String">string::String</a>, uri: <a href="../../aptos-framework/../aptos-stdlib/../move-stdlib/doc/string.md#0x1_string_String">string::String</a>, property_keys: <a href="../../aptos-framework/../aptos-stdlib/../move-stdlib/doc/vector.md#0x1_vector">vector</a>&lt;<a href="../../aptos-framework/../aptos-stdlib/../move-stdlib/doc/string.md#0x1_string_String">string::String</a>&gt;, property_types: <a href="../../aptos-framework/../aptos-stdlib/../move-stdlib/doc/vector.md#0x1_vector">vector</a>&lt;<a href="../../aptos-framework/../aptos-stdlib/../move-stdlib/doc/string.md#0x1_string_String">string::String</a>&gt;, property_values: <a href="../../aptos-framework/../aptos-stdlib/../move-stdlib/doc/vector.md#0x1_vector">vector</a>&lt;<a href="../../aptos-framework/../aptos-stdlib/../move-stdlib/doc/vector.md#0x1_vector">vector</a>&lt;u8&gt;&gt;): <b>address</b>
+</code></pre>
+
+
+
+<details>
+<summary>Implementation</summary>
+
+
+<pre><code><b>public</b> <b>fun</b> <a href="aptos_token.md#0x4_aptos_token_mint_with_address">mint_with_address</a>(
+    creator: &<a href="../../aptos-framework/../aptos-stdlib/../move-stdlib/doc/signer.md#0x1_signer">signer</a>,
+    <a href="collection.md#0x4_collection">collection</a>: String,
+    description: String,
+    name: String,
+    uri: String,
+    property_keys: <a href="../../aptos-framework/../aptos-stdlib/../move-stdlib/doc/vector.md#0x1_vector">vector</a>&lt;String&gt;,
+    property_types: <a href="../../aptos-framework/../aptos-stdlib/../move-stdlib/doc/vector.md#0x1_vector">vector</a>&lt;String&gt;,
+    property_values: <a href="../../aptos-framework/../aptos-stdlib/../move-stdlib/doc/vector.md#0x1_vector">vector</a>&lt;<a href="../../aptos-framework/../aptos-stdlib/../move-stdlib/doc/vector.md#0x1_vector">vector</a>&lt;u8&gt;&gt;,
+): <b>address</b> <b>acquires</b> <a href="aptos_token.md#0x4_aptos_token_AptosCollection">AptosCollection</a>, <a href="aptos_token.md#0x4_aptos_token_AptosToken">AptosToken</a> {
     <b>let</b> constructor_ref = <a href="aptos_token.md#0x4_aptos_token_mint_internal">mint_internal</a>(
         creator,
         <a href="collection.md#0x4_collection">collection</a>,
@@ -383,14 +428,16 @@ With an existing collection, directly mint a viable token into the creators acco
 
     <b>let</b> <a href="collection.md#0x4_collection">collection</a> = <a href="aptos_token.md#0x4_aptos_token_collection_object">collection_object</a>(creator, &<a href="collection.md#0x4_collection">collection</a>);
     <b>let</b> freezable_by_creator = <a href="aptos_token.md#0x4_aptos_token_are_collection_tokens_freezable">are_collection_tokens_freezable</a>(<a href="collection.md#0x4_collection">collection</a>);
-    <b>if</b> (!freezable_by_creator) {
-        <b>return</b>
-    };
 
     <b>let</b> aptos_token_addr = <a href="../../aptos-framework/doc/object.md#0x1_object_address_from_constructor_ref">object::address_from_constructor_ref</a>(&constructor_ref);
+    <b>if</b> (!freezable_by_creator) {
+        <b>return</b> aptos_token_addr
+    };
+
     <b>let</b> <a href="aptos_token.md#0x4_aptos_token">aptos_token</a> = <b>borrow_global_mut</b>&lt;<a href="aptos_token.md#0x4_aptos_token_AptosToken">AptosToken</a>&gt;(aptos_token_addr);
     <b>let</b> transfer_ref = <a href="../../aptos-framework/doc/object.md#0x1_object_generate_transfer_ref">object::generate_transfer_ref</a>(&constructor_ref);
     <a href="../../aptos-framework/../aptos-stdlib/../move-stdlib/doc/option.md#0x1_option_fill">option::fill</a>(&<b>mut</b> <a href="aptos_token.md#0x4_aptos_token">aptos_token</a>.transfer_ref, transfer_ref);
+    aptos_token_addr
 }
 </code></pre>
 

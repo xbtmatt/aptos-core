@@ -138,6 +138,30 @@ module aptos_token_objects::aptos_token {
         property_types: vector<String>,
         property_values: vector<vector<u8>>,
     ) acquires AptosCollection, AptosToken {
+        mint_with_address(
+            creator,
+            collection,
+            description,
+            name,
+            uri,
+            property_keys,
+            property_types,
+            property_values,
+        );
+    }
+
+    /// With an existing collection, directly mint a viable token into the creators account.
+    /// Identical to the mint entry function, but makes finding the created object's address easier.
+    public fun mint_with_address(
+        creator: &signer,
+        collection: String,
+        description: String,
+        name: String,
+        uri: String,
+        property_keys: vector<String>,
+        property_types: vector<String>,
+        property_values: vector<vector<u8>>,
+    ): address acquires AptosCollection, AptosToken {
         let constructor_ref = mint_internal(
             creator,
             collection,
@@ -151,14 +175,16 @@ module aptos_token_objects::aptos_token {
 
         let collection = collection_object(creator, &collection);
         let freezable_by_creator = are_collection_tokens_freezable(collection);
-        if (!freezable_by_creator) {
-            return
-        };
 
         let aptos_token_addr = object::address_from_constructor_ref(&constructor_ref);
+        if (!freezable_by_creator) {
+            return aptos_token_addr
+        };
+
         let aptos_token = borrow_global_mut<AptosToken>(aptos_token_addr);
         let transfer_ref = object::generate_transfer_ref(&constructor_ref);
         option::fill(&mut aptos_token.transfer_ref, transfer_ref);
+        aptos_token_addr
     }
 
     /// With an existing collection, directly mint a soul bound token into the recipient's account.
