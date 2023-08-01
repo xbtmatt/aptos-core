@@ -10,4 +10,10 @@ module test_examples::input_test {
     public fun two_strings(s1: String, s2: String): String {
         string_utils::format2(&b"{}::{}", s1, s2)
     }
+
+    #[view]
+    public fun chain_id(): u8 {
+        aptos_std::chain_id::get()
+    }
+
 }
