@@ -1,0 +1,10 @@
+[package]
+name = 'Template'
+version = '0.0.1'
+
+[addresses]
+package="0x9cb015cc08c4c21a68ec80011163cafc3cecbc9a359b8daeac108d0a2cc8f646"
+
+[dependencies]
+AptosFramework = { local = "../framework/aptos-framework" }
+AptosTokenObjects = { local = "../framework/aptos-token-objects" }

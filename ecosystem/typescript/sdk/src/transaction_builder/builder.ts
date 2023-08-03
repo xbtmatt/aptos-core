@@ -207,7 +207,7 @@ export class TransactionBuilderABI {
     };
   }
 
-  private static toBCSArgs(abiArgs: any[], args: any[]): Bytes[] {
+  public static toBCSArgs(abiArgs: any[], args: any[]): Bytes[] {
     if (abiArgs.length !== args.length) {
       throw new Error("Wrong number of args provided.");
     }
@@ -219,7 +219,7 @@ export class TransactionBuilderABI {
     });
   }
 
-  private static toTransactionArguments(abiArgs: any[], args: any[]): TransactionArgument[] {
+  public static toTransactionArguments(abiArgs: any[], args: any[]): TransactionArgument[] {
     if (abiArgs.length !== args.length) {
       throw new Error("Wrong number of args provided.");
     }
@@ -365,6 +365,41 @@ export class TransactionBuilderRemoteABI {
     });
 
     return abiMap;
+  }
+
+  async buildStruct(func: Gen.EntryFunctionId, ty_tags: Gen.MoveType[], args: any[]): Promise<any> {
+    /* eslint no-param-reassign: ["off"] */
+    const normlize = (s: string) => s.replace(/^0[xX]0*/g, "0x");
+    func = normlize(func);
+    const funcNameParts = func.split("::");
+    if (funcNameParts.length !== 3) {
+      throw new Error(
+        // eslint-disable-next-line max-len
+        "'func' needs to be a fully qualified function name in format <address>::<module>::<function>, e.g. 0x1::coin::transfer",
+      );
+    }
+
+    const [addr, module] = func.split("::");
+
+    // Downloads the JSON abi
+    const abiMap = await this.fetchABI(addr);
+    if (!abiMap.has(func)) {
+      throw new Error(`${func} doesn't exist.`);
+    }
+
+    const funcAbi = abiMap.get(func);
+
+    // Remove all `signer` and `&signer` from argument list because the Move VM injects those arguments. Clients do not
+    // need to care about those args. `signer` and `&signer` are required be in the front of the argument list. But we
+    // just loop through all arguments and filter out `signer` and `&signer`.
+    const abiArgs = funcAbi!.params.filter((param) => param !== "signer" && param !== "&signer");
+
+    // Convert abi string arguments to TypeArgumentABI
+    const typeArgABIs = abiArgs.map(
+      (abiArg, i) => new ArgumentABI(`var${i}`, new TypeTagParser(abiArg, ty_tags).parseTypeTag()),
+    );
+
+    return typeArgABIs;
   }
 
   /**
