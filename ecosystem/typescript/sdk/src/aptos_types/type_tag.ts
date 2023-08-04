@@ -173,6 +173,28 @@ export class TypeTagStruct extends TypeTag {
     }
     return false;
   }
+
+  isObjectTypeTag(): boolean {
+    if (
+      this.value.module_name.value === "object" &&
+      this.value.name.value === "Object" &&
+      this.value.address.toHexString() === AccountAddress.CORE_CODE_ADDRESS.toHexString()
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  isOptionTypeTag(): boolean {
+    if (
+      this.value.module_name.value === "option" &&
+      this.value.name.value === "Option" &&
+      this.value.address.toHexString() === AccountAddress.CORE_CODE_ADDRESS.toHexString()
+    ) {
+      return true;
+    }
+    return false;
+  }
 }
 
 export class StructTag {

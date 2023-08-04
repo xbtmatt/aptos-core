@@ -1,82 +1,179 @@
+import {
+  AptosAccount,
+  FaucetClient,
+  Network,
+  Provider,
+  HexString,
+  TxnBuilderTypes,
+  Types,
+  TransactionBuilder,
+  TransactionBuilderABI,
+  TransactionBuilderRemoteABI,
+  TypeTagParser,
+} from "aptos";
+export const NODE_URL = process.env.APTOS_NODE_URL || "http://0.0.0.0:8080" || "https://fullnode.devnet.aptoslabs.com";
+export const FAUCET_URL =
+  process.env.APTOS_FAUCET_URL || "http://0.0.0.0:8081" || "https://faucet.devnet.aptoslabs.com";
 
-import { AptosAccount, FaucetClient, Network, Provider, HexString, TxnBuilderTypes, Types, TransactionBuilder, TransactionBuilderABI, TransactionBuilderRemoteABI, TypeTagParser } from "aptos";
-export const NODE_URL = process.env.APTOS_NODE_URL || "https://fullnode.devnet.aptoslabs.com";
-export const FAUCET_URL = process.env.APTOS_FAUCET_URL || "https://faucet.devnet.aptoslabs.com";
-
-const provider = new Provider(Network.LOCAL);
+const provider = new Provider({ fullnodeUrl: NODE_URL, indexerUrl: "none" });
 const aptosClient = provider.aptosClient;
 const faucetClient = new FaucetClient(NODE_URL, FAUCET_URL);
 
-export const fetchABI = async(addr: string) => {
-    const modules = await aptosClient.getAccountModules(addr);
-    const resource = modules.map((module) => module.abi).flatMap((abi) => abi.structs).find((struct) => struct.name === 'Resource');
-    //console.log(resource);
-    const argumentABIs = resource.fields.map((f) =>
-      new TxnBuilderTypes.ArgumentABI(`${f.name}`, new TypeTagParser(f.type, []).parseTypeTag());
-    );
+function toTransactionArguments(abiArgs: any[], args: any[]): TxnBuilderTypes.TransactionArgument[] {
+  if (abiArgs.length !== args.length) {
+    throw new Error("Wrong number of args provided.");
+  }
 
-    argumentABIs.map((arg, i) => argToTransactionArgument(arg, abiArgs[i].type_tag));
-    
-  public static toTransactionArguments(abiArgs: any[], args: any[]): TransactionArgument[] {
-    if (abiArgs.length !== args.length) {
-      throw new Error("Wrong number of args provided.");
+  return args.map((arg, i) => argToTransactionArgument(arg, abiArgs[i].type_tag));
+}
+
+export const fetchABI = async (addr: string) => {
+  const modules = await aptosClient.getAccountModules(addr);
+  const resource = modules
+    .map((module) => module.abi)
+    .flatMap((abi) => abi.structs)
+    .find((struct) => struct.name === "Resource");
+  //console.log(resource);
+  const argumentABIs = resource.fields.map((f) => {
+    console.log(f.name, f.type);
+    return new TxnBuilderTypes.ArgumentABI(`${f.name}`, new TypeTagParser(f.type, []).parseTypeTag());
+  });
+
+  const myArgs = [
+    // primitives
+
+    8, // arg_1: u8,
+    16, // arg_2: u16,
+    32, // arg_3: u32,
+    64, // arg_4: u64,
+    128, // arg_5: u128,
+    256, // arg_6: u256,
+    true, // arg_7: bool,
+    "string", // arg_8: String,
+    new HexString("0x0a56e8b03118e51cf88140e5e18d1f764e0a1048c23e7c56bd01bd5b76993451"), // arg_9: address,
+
+    // objects
+
+    new HexString("0x0a56e8b03118e51cf88140e5e18d1f764e0a1048c23e7c56bd01bd5b76993451"), // arg_10: Object<u8>,
+    new HexString("0x0a56e8b03118e51cf88140e5e18d1f764e0a1048c23e7c56bd01bd5b76993451"), // arg_11: Object<u16>,
+    new HexString("0x0a56e8b03118e51cf88140e5e18d1f764e0a1048c23e7c56bd01bd5b76993451"), // arg_12: Object<u32>,
+    new HexString("0x0a56e8b03118e51cf88140e5e18d1f764e0a1048c23e7c56bd01bd5b76993451"), // arg_13: Object<u64>,
+    new HexString("0x0a56e8b03118e51cf88140e5e18d1f764e0a1048c23e7c56bd01bd5b76993451"), // arg_14: Object<u128>,
+    new HexString("0x0a56e8b03118e51cf88140e5e18d1f764e0a1048c23e7c56bd01bd5b76993451"), // arg_15: Object<u256>,
+    new HexString("0x0a56e8b03118e51cf88140e5e18d1f764e0a1048c23e7c56bd01bd5b76993451"), // arg_16: Object<bool>,
+    new HexString("0x0a56e8b03118e51cf88140e5e18d1f764e0a1048c23e7c56bd01bd5b76993451"), // arg_17: Object<String>,
+    new HexString("0x0a56e8b03118e51cf88140e5e18d1f764e0a1048c23e7c56bd01bd5b76993451"), // arg_18: Object<address>,
+
+    // options
+
+    [8], // arg_19: Option<u8>,
+    [16], // arg_20: Option<u16>,
+    [32], // arg_21: Option<u32>,
+    [64], // arg_22: Option<u64>,
+    [128], // arg_23: Option<u128>,
+    [256], // arg_24: Option<u256>,
+    [true], // arg_25: Option<bool>,
+    ["string"], // arg_26: Option<String>,
+    [new HexString("0x0a56e8b03118e51cf88140e5e18d1f764e0a1048c23e7c56bd01bd5b76993451")], // arg_27: Option<address>,
+
+    // vectors
+
+    [8], // arg_28: vector<u8>,
+    [16], // arg_29: vector<u16>,
+    [32], // arg_30: vector<u32>,
+    [64], // arg_31: vector<u64>,
+    [128], // arg_32: vector<u128>,
+    [256], // arg_33: vector<u256>,
+    [true], // arg_34: vector<bool>,
+    ["string"], // arg_35: vector<String>,
+    [new HexString("0x0a56e8b03118e51cf88140e5e18d1f764e0a1048c23e7c56bd01bd5b76993451")], // arg_36: vector<address>,
+  ];
+
+  const transactionArguments = argumentABIs.map((arg, i) => {
+    console.log("\n---------------------------------------------------------------");
+    console.log(myArgs[i], arg.name, arg.type_tag);
+    console.log(argToTransactionArgument(myArgs[i], arg.type_tag));
+    argToTransactionArgument(myArgs[i], arg.type_tag);
+  });
+  console.debug(transactionArguments);
+
+  // modules.map((module) => {
+  //   module.abi
+  // }).flatMap((abi) => { console.log(abi); });
+
+  // const abis = modules
+  //   .map((module) => module.abi)
+  //   .flatMap((abi) =>
+  //     abi!.structs
+  //       .filter((ef) => ef.fields.every((f) => isSupportedStruct(f)))
+  //       .map(
+  //         (ef) =>
+  //           { ef
+  //           console.debug(ef.fields.map(f => new TxnBuilderTypes.ArgumentABI(`var${f}`, new TypeTagParser(f.type, []).parseTypeTag()))) }
+  //       ),
+  //   );
+
+  // // Convert abi string arguments to TypeArgumentABI
+  // const typeArgABIs = abiArgs.map(
+  //   (abiArg, i) => new TxnBuilderTypes.ArgumentABI(`var${i}`, new TypeTagParser(abiArg, ty_tags).parseTypeTag()),
+  // );
+};
+
+function isSupportedStruct(f: Types.MoveStructField): boolean {
+  const arr = [
+    "u8",
+    "u16",
+    "u32",
+    "u64",
+    "u128",
+    "u256",
+    "bool",
+    "String",
+    "address",
+    "0x1::object::Object",
+    "0x1::string::String",
+    "0x1::option::Option",
+    "vector",
+  ];
+
+  return arr.includes(f.type);
+}
+
+function isObjectTypeTag(tag: TxnBuilderTypes.TypeTagStruct): boolean {
+  if (
+    tag.value.module_name.value === "object" &&
+    tag.value.name.value === "Object" &&
+    tag.value.address.toHexString() === TxnBuilderTypes.AccountAddress.CORE_CODE_ADDRESS.toHexString()
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function isOptionTypeTag(tag: TxnBuilderTypes.TypeTagStruct): boolean {
+  if (
+    tag.value.module_name.value === "option" &&
+    tag.value.name.value === "Option" &&
+    tag.value.address.toHexString() === TxnBuilderTypes.AccountAddress.CORE_CODE_ADDRESS.toHexString()
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function argToTransactionArgument(
+  argVal: any,
+  argType: TxnBuilderTypes.TypeTag,
+): TxnBuilderTypes.TransactionArgument {
+  if (argType instanceof TxnBuilderTypes.TypeTagStruct) {
+    console.debug(argType);
+    console.debug(argVal);
+    if (argType.isStringTypeTag()) {
+    } else if (isObjectTypeTag(argType)) {
+    } else if (isOptionTypeTag(argType)) {
+      return new TxnBuilderTypes.TransactionArgumentU8Vector();
     }
-
-    return args.map((arg, i) => argToTransactionArgument(arg, abiArgs[i].type_tag));
   }
-
-    modules.map((module) => {
-      module.abi
-    }).flatMap((abi) => { console.log(abi); });
-
-    const abis = modules
-      .map((module) => module.abi)
-      .flatMap((abi) =>
-        abi!.structs
-          .filter((ef) => ef.fields.every((f) => isSupportedStruct(f)))
-          .map(
-            (ef) =>
-              { ef
-              console.debug(ef.fields.map(f => new TxnBuilderTypes.ArgumentABI(`var${f}`, new TypeTagParser(f.type, []).parseTypeTag()))) }
-          ),
-      );
-
-      // // Convert abi string arguments to TypeArgumentABI
-      // const typeArgABIs = abiArgs.map(
-      //   (abiArg, i) => new TxnBuilderTypes.ArgumentABI(`var${i}`, new TypeTagParser(abiArg, ty_tags).parseTypeTag()),
-      // );
-
-  }
-  
-  function isSupportedStruct(f: Types.MoveStructField): boolean {
-    const arr = ['u8',
-    'u16',
-    'u32',
-    'u64',
-    'u128',
-    'u256',
-    'bool',
-    'String',
-    'address',
-    '0x1::object::Object',
-    '0x1::string::String',
-    '0x1::option::Option',
-    'vector'];
-  
-    return (arr.includes(f.type))
-  
-  }
-
-
-  
-(async () => {
-  await fetchABI("0x9cb015cc08c4c21a68ec80011163cafc3cecbc9a359b8daeac108d0a2cc8f646");
-})()
-
-
-
-
-export function argToTransactionArgument(argVal: any, argType: TxnBuilderTypes.TypeTag): TxnBuilderTypes.TransactionArgument {
   if (argType instanceof TxnBuilderTypes.TypeTagBool) {
     return new TxnBuilderTypes.TransactionArgumentBool(ensureBoolean(argVal));
   }
@@ -118,7 +215,6 @@ export function argToTransactionArgument(argVal: any, argType: TxnBuilderTypes.T
 
   throw new Error("Unknown type for TransactionArgument.");
 }
-
 
 function assertType(val: any, types: string[] | string, message?: string) {
   if (!types?.includes(typeof val)) {
@@ -162,3 +258,9 @@ export function ensureBigInt(val: number | bigint | string): bigint {
   assertType(val, ["number", "bigint", "string"]);
   return BigInt(val);
 }
+
+async function main() {
+  await fetchABI("0x0a56e8b03118e51cf88140e5e18d1f764e0a1048c23e7c56bd01bd5b76993451");
+}
+
+main();
