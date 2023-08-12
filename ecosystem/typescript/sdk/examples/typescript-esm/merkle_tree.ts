@@ -5,22 +5,6 @@ import assert from 'assert';
 import { verify } from 'tweetnacl';
 const { sha3_256 } = pkg;
 
-function hexToUtf8(hex: string): string {
-    return Buffer.from(hex, 'hex').toString('utf8');
-}
-
-function hexToU8(hex: string): Uint8Array {
-    return new Uint8Array(Buffer.from(hex, 'hex'))
-}
-
-function stringToHexBuffer(str: string): string {
-    let hex = '';
-    for (let i = 0; i < str.length; i++) {
-        hex += str.charCodeAt(i).toString(16);
-    }
-    return Buffer.from(hex, 'hex').toString('hex');
-}
-
 const DEPLOYMENT_ADDRESS = TxnBuilderTypes.AccountAddress.fromHex(new HexString('0x7bebd4cb2f61101b5bfc9f17c2e0a7754368de05391333c6c02439d7f533bb49'));
 
 const serializeVectorOfVectors = (proofVector: Array<Uint8Array>): Uint8Array => {
@@ -75,53 +59,6 @@ const doSomethingWithElevatedAccessOnChain = async (
     return (await provider.waitForTransactionWithResult(txnHash,)) as Types.UserTransaction;
 }
 
-const viewVerifyProof = async (
-    provider: Provider,
-    sender: TxnBuilderTypes.AccountAddress,
-    merkleOwner: TxnBuilderTypes.AccountAddress,
-    proofVectors: Array<Uint8Array>,
-): Promise<boolean> => {
-    const stringsForView = proofVectors.map(v => HexString.fromUint8Array(v).toString().slice(2));
-    console.log(stringsForView);
-    return ((await provider.view({
-        function: `${DEPLOYMENT_ADDRESS.toHexString()}::test_merkle::verify_proof`,
-        type_arguments: [],
-        arguments: [
-            sender.toHexString(),
-            merkleOwner.toHexString(),
-            stringsForView,
-        ],
-    })) as any)[0]
-}
-
-const addrBytes = async (
-    provider: Provider,
-    accountAddress: TxnBuilderTypes.AccountAddress,
-): Promise<boolean> => {
-    return ((await provider.view({
-        function: `${DEPLOYMENT_ADDRESS.toHexString()}::test_merkle::addr_bytes`,
-        type_arguments: [],
-        arguments: [
-            accountAddress.toHexString(),
-        ],
-    })) as any)[0]
-}
-
-const viewTest = async (
-    provider: Provider,
-    proofVectors: Array<Uint8Array>,
-): Promise<boolean> => {
-    const stringsForView = proofVectors.map(v => HexString.fromUint8Array(v).toString().slice(2));
-    console.log(stringsForView);
-    return ((await provider.view({
-        function: `${DEPLOYMENT_ADDRESS.toHexString()}::test_merkle::testthingy`,
-        type_arguments: [],
-        arguments: [
-            stringsForView,
-        ],
-    })) as any)[0]
-}
-
 const createProofVectorForAddress = (
     merkleTree: MerkleTree,
     accountAddress: TxnBuilderTypes.AccountAddress
@@ -132,7 +69,6 @@ const createProofVectorForAddress = (
             [Buffer.from([v.position == 'left' ? 0 : 1]), new Uint8Array(v.data.valueOf())]
     ));
 }
-
 
 // Say I have a list of addresses I want to allow to do something and I want to use a merkle tree to do it
 // the process for this, using this file and `merkle_tree.move` is as follows:
