@@ -1,0 +1,12 @@
+[package]
+name = 'Merkle Tree'
+version = '0.0.1'
+
+[addresses]
+package="_"
+
+[dev-addresses]
+package="0xbeefcafe"
+
+[dependencies]
+AptosFramework = { local = "../../framework/aptos-framework" }

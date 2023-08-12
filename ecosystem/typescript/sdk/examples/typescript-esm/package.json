@@ -7,13 +7,16 @@
   "scripts": {
     "build": "rm -rf dist/* && tsc -p .",
     "test": "pnpm build && node ./dist/index.js",
-    "rotate_key": "ts-node --esm rotate_key.ts"
+    "rotate_key": "ts-node --esm rotate_key.ts",
+    "merkle_tree": "ts-node --esm merkle_tree.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "aptos": "latest"
+    "aptos": "latest",
+    "js-sha3": "^0.8.0",
+    "merkletreejs": "^0.3.10"
   },
   "devDependencies": {
     "@types/node": "18.6.2",
