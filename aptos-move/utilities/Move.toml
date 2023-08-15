@@ -1,0 +1,10 @@
+[package]
+name = 'Utilities'
+version = '0.0.1'
+
+[addresses]
+utilities="0xb7c22590e1532069403c2a721bcf31d1a45fc3acd7c12903b3cf0fe23f486411"
+
+[dependencies]
+AptosFramework = { local = "../framework/aptos-framework" }
+AptosTokenObjects = { local = "../framework/aptos-token-objects" }
