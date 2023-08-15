@@ -13,4 +13,14 @@ module utilities::utils {
       collection::create_collection_address(&creator, &name)
    }
 
+   #[view]
+   public fun create_token_address(creator: address, collection: String, name: String): address {
+      token::create_token_address(&creator, &collection, &name)
+   }
+
+   #[view]
+   public fun create_collection_address(creator: address, name: String): address {
+      collection::create_collection_address(&creator, &name)
+   }
+
 }
