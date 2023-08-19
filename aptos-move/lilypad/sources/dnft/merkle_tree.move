@@ -23,7 +23,7 @@ module pond::merkle_tree {
 	const HASH_LENGTH: u64 = 32;
 
 	public fun new(root_hash: vector<u8>): MerkleTree {
-		assert!(vector::length(&root_hash) == HASH_LENGTH, error::invalid_argument(EINCORRECT_HASH_LENGTH)); 
+		assert!(vector::length(&root_hash) == HASH_LENGTH, error::invalid_argument(EINCORRECT_HASH_LENGTH));
 		MerkleTree {
 			root_hash
 		}
@@ -59,7 +59,7 @@ module pond::merkle_tree {
 	) {
 		let MerkleTree {
 			root_hash: _,
-		} = merkle_tree,
+		} = merkle_tree;
 	}
 
 	/// helper function to return the concat'd vector :p

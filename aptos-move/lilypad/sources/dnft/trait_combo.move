@@ -3,7 +3,7 @@
 /// for the derived resource account.
 /// We copy all the trait values and objects at the time of creation, and set a flag that specifies
 /// whether or not the UniqueCombination is currently in use.
-module pond::unique_combinations {
+module pond::trait_combo {
     use std::object::{Self, Object, ConstructorRef, ExtendRef, TransferRef, LinearTransferRef};
     use aptos_token::token::{Self as token_v1, Token};
     use token_objects::token::{Self as token_v2, MutatorRef, Token as TokenObject};
@@ -70,7 +70,7 @@ module pond::unique_combinations {
     ): (bool) {
         exists<UniqueCombination>(obj_addr)
     }
-    
+
     #[view]
     public fun trait_combo_in_use(
         at: address,
@@ -216,11 +216,11 @@ module pond::unique_combinations {
         toad_v2::set_unique_combination(toad_obj, new_combo_object);
     }
 
-    public(friend) fun get_in_use(
-        resource_addr: address,
-        trait_combo_address: address,
-    ) {
-        
-    }
+    // public(friend) fun get_in_use(
+    //     resource_addr: address,
+    //     trait_combo_address: address,
+    // ) {
+
+    // }
 
 }

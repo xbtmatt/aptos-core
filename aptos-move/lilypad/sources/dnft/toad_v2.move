@@ -100,10 +100,10 @@ module pond::toad_v2 {
     const LOWERCASE_UPPER_BOUND: u64 = 122;
     const PERFECT_TOAD_NUM_TRAITS: u64 = 2;
     const MAX_TRAITS: u64 = 7;
-    
+
     const DELIMITER: vector<u8> = b"::";
-    
-    // Equippable Headwear for an Aptoad. 🧢
+
+    // Equippable Headwear for an Aptoad.
     const TRAIT_DESCRIPTION_FORMAT: vector<u8> = b"Equippable {} for an Aptoad. {}";
 
     const PERFECT_TOAD_DESCRIPTION: vector<u8> = b"{} is a perfect toad- one of only ten.";
@@ -212,7 +212,7 @@ module pond::toad_v2 {
             base_toad_object,
             perfect,
         );
-        
+
         // NOTE: These are redundant. We can remove these because they will likely change the gas cost
         // of the transaction drastically. The image_uri is assumed to be unchanged and valid since I've
         // never changed them.
@@ -464,12 +464,12 @@ module pond::toad_v2 {
 
         // make the change before creating the trait map
         equip_trait<T>(toad_object, obj_to_equip);
-        
+
         // create the new trait map
         let new_trait_map = get_v2_trait_map(toad_object);
 
         // runs all checks to ensure the state of the toad is valid post-change
-        let leaf_hash = 
+        let leaf_hash =
             verified_uri_update(new_trait_map, base_toad_object, unvalidated_image_uri, proof);
         let validated_image_uri = unvalidated_image_uri;
 
@@ -486,7 +486,7 @@ module pond::toad_v2 {
             abort_if_exists,
         );
 
-        let (background, body, clothing, headwear, eyewear, mouth, fly) = 
+        let (background, body, clothing, headwear, eyewear, mouth, fly) =
 
         emit_new_combination_event(
             internal_get_aptoad_signer(toad_object),
@@ -520,12 +520,12 @@ module pond::toad_v2 {
 
         // make the change before creating the trait map
         unequip_trait<T>(toad_object);
-        
+
         // create the new trait map
         let new_trait_map = get_v2_trait_map(toad_object);
 
         // runs all checks to ensure the state of the toad is valid post-change
-        let leaf_hash = 
+        let leaf_hash =
             verified_uri_update(new_trait_map, base_toad_object, unvalidated_image_uri, proof);
         let validated_image_uri = unvalidated_image_uri;
 
@@ -542,7 +542,7 @@ module pond::toad_v2 {
             abort_if_exists,
         );
 
-        let (background, body, clothing, headwear, eyewear, mouth, fly) = 
+        let (background, body, clothing, headwear, eyewear, mouth, fly) =
 
         emit_new_combination_event(
             internal_get_aptoad_signer(toad_object),
@@ -869,11 +869,11 @@ module pond::toad_v2 {
 
     #[view]
     public fun get_trait_description(trait_type: String, trait_name: String): String {
-        let trait_type_emoji = if (trait_type == str(CLOTHING))   { str(b"👕") }
-                          else if (trait_type == str(HEADWEAR))   { str(b"🧢") }
-                          else if (trait_type == str(EYEWEAR))    { str(b"🕶") }
-                          else if (trait_type == str(MOUTH))      { str(b"👄") }
-                          else if (trait_type == str(FLY))        { str(b"🪰") }
+        let trait_type_emoji = if (trait_type == str(CLOTHING))   { x"F09F9195" }
+                          else if (trait_type == str(HEADWEAR))   { x"F09FA7A2" }
+                          else if (trait_type == str(EYEWEAR))    { x"F09F95B6" }
+                          else if (trait_type == str(MOUTH))      { x"F09F9184" }
+                          else if (trait_type == str(FLY))        { x"F09FAAB0" }
                           else { abort error::invalid_argument(EINVALID_TRAIT_TYPE) };
 
         std::string_utils::format2(TRAIT_DESCRIPTION_FORMAT, trait_type, trait_type_emoji);
@@ -925,7 +925,7 @@ module pond::toad_v2 {
         let concatenated_trait_string = to_upper(concatenated_trait_and_url);
         let concatenated_trait_bytes = *string::bytes(&concatenated_trait_string);
         let internally_verified_leaf_hash = hash::sha3_256(concatenated_trait_bytes);
-        
+
         let merkle_tree = &borrow_global<MigrationConfig>.merkle_tree;
 
         let is_valid_proof = merkle_tree::verify_proof(
@@ -1073,7 +1073,7 @@ module pond::toad_v2 {
         event::emit_event(
             &mut event_handles.new_combination_events,
             NewCombinationEvent {
-                signer::address_of(token_signer),
+                toad_obj: object::address_to_object<Aptoad>(signer::address_of(token_signer)),
                 old_collection_name,
                 owner_addr,
                 background,
@@ -1121,7 +1121,6 @@ module pond::toad_v2 {
         toad_object: Object<Aptoad>,
         equipped_trait: Object<Token>,
     ) acquires EventHandles {
-        let token_signer = 
         let event_handles = borrow_global_mut<EventHandles>(signer::address_of(token_signer));
         event::emit_event(
             &mut event_handles.equip_events,
@@ -1136,7 +1135,6 @@ module pond::toad_v2 {
         toad_object: Object<Aptoad>,
         unequipped_trait: Object<Token>,
     ) acquires EventHandles {
-        let token_signer = 
         let event_handles = borrow_global_mut<EventHandles>(signer::address_of(token_signer));
         event::emit_event(
             &mut event_handles.unequip_events,
@@ -1183,5 +1181,5 @@ module pond::toad_v2 {
         assert!(to_lower(str(b"HELLO")) == str(b"hello"));
         assert!(to_lower(str(b"hello WORLD")) == str(b"hello world"));
         assert!(to_lower(str(b"hello WORLD !@#[`{")) == str(b"hello world !@#[`{"));
-    }    
+    }
 }
