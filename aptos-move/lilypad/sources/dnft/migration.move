@@ -3,11 +3,12 @@ module pond::migration {
    use std::error;
    use std::option;
    // use std::table;
-   use std::object::{Self, Object};
+   use std::object::{Object};
    use std::vector;
    use aptos_token::property_map;
    use aptos_token::token::{Self as token_v1, Token, TokenId};
    use aptos_token_objects::collection::{Self as collection_v2, Collection};
+   use aptos_token_objects::token::{Self as token_v2};
    use std::string::{utf8 as str, String};
 
    /// You are not the owner of that token.
@@ -55,7 +56,7 @@ module pond::migration {
       collection_name: String,
       token_name: String,
    ): address {
-      create_token_address(
+      token_v2::create_token_address(
          &creator_addr,
          &collection_name,
          &token_name,

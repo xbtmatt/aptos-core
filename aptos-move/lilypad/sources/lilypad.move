@@ -796,7 +796,7 @@ module pond::lilypad {
 
 	public(friend) fun get_creator_addr(
 		resource_address: address,
-	) acquires OriginalCreatorAddress {
+	): address acquires OriginalCreatorAddress {
 		borrow_global<OriginalCreatorAddress>(resource_address).creator_addr
 	}
 
