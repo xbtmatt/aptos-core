@@ -16,7 +16,6 @@ module pond::lilypad {
 	use aptos_token::token::{Self};
 	friend pond::migration;
 	friend pond::toad_v2;
-	friend pond::trait_combo;
 
 	const MILLI_CONVERSION_FACTOR: u64 = 1000;
 	const MICRO_CONVERSION_FACTOR: u64 = 1000000;

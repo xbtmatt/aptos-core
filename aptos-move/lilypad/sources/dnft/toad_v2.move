@@ -1,9 +1,9 @@
 module pond::toad_v2 {
-    use std::object::{Self, Object, ConstructorRef, ExtendRef, TransferRef, LinearTransferRef};
-    use aptos_token::token::{Self as token_v1, Token};
-    use token_objects::token::{Self as token_v2, MutatorRef, Token as TokenObject};
-    use token_objects::collection::{Self as collection_v2, Collection};
-    use token_objects::royalty::{Royalty};
+    use std::object::{Self, Object, ConstructorRef, ExtendRef, TransferRef};
+    use aptos_token::token::{Self as token_v1, Token as OldToken};
+    use aptos_token_objects::token::{Self as token_v2, Token, MutatorRef};
+    use aptos_token_objects::collection::{Self as collection_v2, Collection};
+    use aptos_token_objects::royalty;
     use std::string::{Self, String, utf8 as str};
     use std::option::{Self, Option};
     use aptos_std::string_utils;
@@ -13,8 +13,11 @@ module pond::toad_v2 {
     use std::signer;
     use std::hash;
     use std::error;
+    use std::table;
     use std::event::{Self, EventHandle};
-    friend pond::migration;
+    use pond::lilypad;
+    use pond::merkle_tree;
+    use aptos_framework::simple_map::{Self, SimpleMap};
     //use pond::lilypad::{internal_get_resource_signer_and_addr};
 
     #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
@@ -93,6 +96,17 @@ module pond::toad_v2 {
         fly_obj: Option<Object<Fly>>,
     }
 
+    struct Preconditions has key {
+        num_combo_objects: u64,
+    }
+
+    #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
+    struct UniqueCombination has key {
+        image_uri: String,
+        transfer_ref: TransferRef,
+        extend_ref: ExtendRef,
+    }
+
     const LOWER_TO_UPPER_ASCII_DIFFERENCE: u64 = 32;
     const UPPERCASE_LOWER_BOUND: u64 = 65;
     const UPPERCASE_UPPER_BOUND: u64 = 90;
@@ -100,6 +114,12 @@ module pond::toad_v2 {
     const LOWERCASE_UPPER_BOUND: u64 = 122;
     const PERFECT_TOAD_NUM_TRAITS: u64 = 2;
     const MAX_TRAITS: u64 = 7;
+    const COLLECTION_NAME: vector<u8> = b"Aptos Toad Overload";
+    const PROPERTY_MAP_STRING_TYPE: vector<u8> = b"0x1::string::String";
+    const COLLECTION_V2_DESCRIPTION: vector<u8> = b"The flagship Aptos NFT | 4000 dynamic pixelated toads taking a leap into the Aptos pond.";
+    const COLLECTION_V2_URI: vector<u8> = b"https://arweave.net/AbA33tqZQj3fJtfn8U4P3EQaCBD9pUWoVNRyTosCxeQ";
+    const MAXIMUM_SUPPLY: u64 = 4000;
+    const TREASURY_ADDRESS: address = @0x790bc9aa92d6e54fccc7ebd699386b0d526dad9686971ff1720dac513c5ba4dc;
 
     const DELIMITER: vector<u8> = b"::";
 
@@ -153,6 +173,38 @@ module pond::toad_v2 {
     /// That trait type token already exists.
     const ETRAIT_TYPE_ALREADY_EXISTS: u64 = 17;
 
+    /////////////// trait combos ///////////////
+    /// That trait combination already exists.
+    const ETRAIT_COMBO_ALREADY_EXISTS: u64 = 18;
+    /// That trait combination does not exist.
+    const ETRAIT_COMBO_DOES_NOT_EXIST: u64 = 19;
+    /// That combination is already in use.
+    const ETRAIT_COMBO_IN_USE: u64 = 20;
+    /// The maximum supplies of the collections do not match.
+    const EMAXIMUM_DOES_NOT_MATCH: u64 = 21;
+    /// The combination objects need to be created prior to enabling the migration.
+    const ECOMBO_OBJECTS_NOT_PRECREATED: u64 = 22;
+    /// Incorrect combination of resource address and v2 collection name.
+    const ECOLLECTION_DOES_NOT_EXIST: u64 = 23;
+    /// One of the arguments must be a toad or the creator resource address.
+    const EINVALID_ARGUMENTS: u64 = 24;
+    /// The given Aptoad Token Object is not in a collection owned by the given creator resource address.
+    const ETOKEN_NOT_IN_COLLECTION: u64 = 25;
+    /// The expectations for the internal state of the contract has been violated.
+    const EINVALID_STATE: u64 = 26;
+
+    /////////////// migration ///////////////
+   /// Collection supply isn't equal to the collection maximum. There is an issue with the collection supply.
+   const EMAX_NOT_SUPPLY: u64 = 27;
+   /// Toad store doesn't exist yet.
+   const ETOAD_STORE_DOES_NOT_EXIST: u64 = 28;
+   /// Provided vector lengths do not match.
+   const EVECTOR_LENGTHS_DO_NOT_MATCH: u64 = 29;
+   /// Migrated vs unmigrated tokens are out of sync. The amount of both should sum to 4,000.
+   const ESUPPLY_OUT_OF_SYNC: u64 = 30;
+
+    const COMBO_SALT: vector<u8> = b"COMBO";
+
 
     // TODO: Remove later, this is purely for a sanity check
     /// The object passed in does not have a Refs resource.
@@ -163,11 +215,11 @@ module pond::toad_v2 {
     /// and error.
     /// The merkle tree will verify the existence of this valid combination of traits.
     /// The keys & values passed in are verified, which is why we skip the get_map_from_traits check
-    public(friend) fun create_v2_toad(
+    fun create_v2_toad(
         resource_signer: &signer,
         resource_addr: address,
         collection_object: Object<Collection>,
-        token: Token,
+        token: OldToken,
         keys: vector<String>,
         values: vector<String>,
         unvalidated_image_uri: String,
@@ -223,7 +275,7 @@ module pond::toad_v2 {
         // Sanity check. TODO: Remove later.
         assert!(validated_image_uri == token_uri, error::invalid_state(EIMAGE_URIS_DONT_MATCH));
 
-        let unique_combination_obj = trait_combo::get_address(resource_addr, leaf_hash);
+        let unique_combination_obj = get_address_combo(resource_addr, leaf_hash);
         assert!(exists<UniqueCombination>(unique_combination_obj),
             error::invalid_state(EUNIQUE_COMBINATION_DOES_NOT_EXIST));
 
@@ -361,6 +413,45 @@ module pond::toad_v2 {
         object_signer
     }
 
+
+   fun create_base_traits(
+      resource_signer: &signer,
+      resource_addr: address,
+      trait_collection_object: Object<Collection>,
+      v2_trait_types: vector<String>,
+      v2_trait_names: vector<String>,
+      v2_trait_symbols: vector<String>,
+      v2_trait_uris: vector<String>,
+   ) {
+      assert!(
+         vector::length(&v2_trait_types) ==
+         vector::length(&v2_trait_names) ==
+         vector::length(&v2_trait_symbols) ==
+         vector::length(&v2_trait_uris),
+         error::invalid_argument(EVECTOR_LENGTHS_DO_NOT_MATCH)
+      );
+
+      vector::reverse(&mut v2_trait_types);
+      vector::reverse(&mut v2_trait_names);
+      vector::reverse(&mut v2_trait_symbols);
+      vector::reverse(&mut v2_trait_uris);
+      while(vector::length(&v2_trait_types) > 0) {
+         let trait_type = vector::pop_back(&mut v2_trait_types);
+         let trait_name = vector::pop_back(&mut v2_trait_names);
+         let trait_symbol = vector::pop_back(&mut v2_trait_symbols);
+         let trait_uri = vector::pop_back(&mut v2_trait_uris);
+         create_base_fungible_trait(
+            resource_signer,
+            resource_addr,
+            trait_collection_object,
+            trait_type,
+            trait_name,
+            trait_symbol,
+            trait_uri
+         );
+      };
+   }
+
     fun create_base_fungible_trait<T>(
         resource_signer: &signer,
         resource_addr: address,
@@ -376,7 +467,7 @@ module pond::toad_v2 {
             &collection_name,
             trait_name
         );
-        assert!(!exists<Object>(token_address), error::invalid_state(ETRAIT_TYPE_ALREADY_EXISTS));
+        assert!(!object::exists_at(token_address), error::invalid_state(ETRAIT_TYPE_ALREADY_EXISTS));
 
         let constructor_ref = token_v2::create_named_token(
             resource_signer,
@@ -639,7 +730,6 @@ module pond::toad_v2 {
         verify_num_traits(new_trait_map);
 
         let leaf_hash = assert_trait_combo_in_merkle(new_trait_map, image_uri, proof);
-        // assert_trait_combo_in_merkle(new_trait_map, image_uri, proof);
         assert!(exists<Refs>(obj_addr), error::not_found(EREFS_NOT_FOUND));
         let ref_resources = borrow_global<Refs>(obj_addr);
         let mutator_ref = &ref_resources.mutator_ref;
@@ -666,6 +756,108 @@ module pond::toad_v2 {
         assert!(exists_at<Aptoad>(toad_obj), error::not_found(ENOT_A_TOAD));
         *&borrow_global_mut<Aptoad>(toad_obj).unique_combination_obj = new_combo_object;
     }
+
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////                                                                   ///////////////////////
+    ///////////////////////                          v1 => v2 migration                       ///////////////////////
+    ///////////////////////                                                                   ///////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    /// gets all the trait types and trait names from a toad in its property map
+    /// and creates a v2 toad from it. Transfers the toad to the owner after creation
+    /// and stores the v1 toad into a simple resource that holds it indefinitely. (would burn if could)
+    /// tracks the # migrated and unmigrated to avoid potential backdoors
+    public entry fun swap_v1_for_v2(
+        owner: &signer,
+        toad_name: String,
+        creator_addr: address,
+        collection_name: String,
+        unvalidated_image_uri: String,
+    ) {
+        let (v1_token, keys, values) =
+            extract_generic_v1_token_and_traits(owner, toad_name, creator_addr, collection_name);
+
+        let (resource_signer, resource_addr) = lilypad::internal_get_resource_signer_and_addr(creator_addr);
+        let collection_object = borrow_global<ToadCollectionConfig>(resource_addr).v2_collection_object;
+
+        // create v2 version
+        let aptoad_object = create_v2_toad(
+            resource_signer,
+            resource_addr,
+            collection_object,
+            v1_token,
+            keys,
+            values,
+            unvalidated_image_uri,
+        );
+
+        let owner_addr = signer::address_of(owner);
+        object::transfer(resource_signer, aptoad_object, owner_addr);
+
+        store_v1_toad_and_track_migrated(
+            owner,
+            resource_signer,
+            v1_token,
+            aptoad_object,
+        );
+    }
+
+   public fun store_v1_toad_and_track_migrated(
+      owner: &signer,
+      resource_signer: &signer,
+      v1_token: OldToken,
+      aptoad_object: Object<Aptoad>,
+   ) {
+      store_toad(v1_token);
+      increment_migrated_and_decrement_unmigrated(resource_signer);
+   }
+
+   fun increment_migrated_and_decrement_unmigrated(
+      resource_addr: address,
+   ) acquires ToadCollectionConfig {
+      let collection_v2_config = borrow_global_mut<ToadCollectionConfig>(resource_addr);
+      *collection_v2_config.unmigrated_v1_tokens = *collection_v2_config.unmigrated_v1_tokens - 1;
+      *collection_v2_config.migrated_v1_tokens = *collection_v2_config.migrated_v1_tokens + 1;
+      assert!(*collection_v2_config.migrated_v1_tokens + *collection_v2_config.unmigrated_v1_tokens == MAXIMUM_SUPPLY,
+         error::invalid_state(ESUPPLY_OUT_OF_SYNC));
+   }
+
+   public fun assert_is_ready_for_migration(
+      resource_addr: address,
+      v1_collection_name: String,
+      v2_collection_name: String,
+   ) acquires Preconditions {
+      assert!(is_ready_for_migration(resource_addr, v1_collection_name, v2_collection_name),
+         error::invalid_state(ECOMBO_OBJECTS_NOT_PRECREATED));
+   }
+
+   #[view]
+   /// we ensure the collection is ready for migration by checking to see how many combo objects
+   /// have been created. It needs to match the collection supply, because the combo objects
+   /// need to be pre-defined before migrating, otherwise early migraters could equip/unequip
+   /// and sit on someone else's toad configuration, never allowing them to migrate
+   public fun is_ready_for_migration(
+      resource_addr: address,
+      v1_collection_name: String,
+      v2_collection_name: String,
+      num_combo_objects: u64,
+   ): bool acquires Preconditions {
+      let v2_collection_addr = collection_v2::create_collection_address(&resource_addr, &v2_collection_name);
+      assert!(object::exists_at<Collection>(v2_collection_addr), error::not_found(ECOLLECTION_DOES_NOT_EXIST));
+      let collection_obj = object::address_to_object<Collection>(v2_collection_addr);
+
+      // TODO: Check max supply? No way to do it yet for v2.
+      let v1_current_supply = token_v1::get_collection_supply(resource_addr, v1_collection_name);
+      let v1_max_supply = token_v1::get_collection_maximum(resource_addr, v1_collection_name);
+      //let v2_current_supply = collection_v2::count(collection_object);
+
+      //assert!(v1_max_supply == v2_max_supply, error::invalid_state(EMAXIMUM_DOES_NOT_MATCH));
+      get_num_combo_objects(resource_addr) == v1_max_supply
+   }
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -879,6 +1071,190 @@ module pond::toad_v2 {
         std::string_utils::format2(TRAIT_DESCRIPTION_FORMAT, trait_type, trait_type_emoji);
     }
 
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////                                                                   ///////////////////////
+    ///////////////////////                             migration                             ///////////////////////
+    ///////////////////////                                                                   ///////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+   struct ToadCollectionConfig has key {
+      unmigrated_v1_tokens: u64,
+      migrated_v1_tokens: u64,
+      v1_collection: String,
+      v2_collection: String,
+      v2_collection_object: Object<Collection>,
+      extend_ref: ExtendRef,
+      transfer_ref: TransferRef,
+      mutator_ref: CollectionMutatorRef,
+      merkle_tree: MerkleTree,
+   }
+
+   struct TraitCollectionConfig has key {
+      v2_collection: String,
+      v2_collection_object: Object<Collection>,
+      extend_ref: ExtendRef,
+      transfer_ref: TransferRef,
+      mutator_ref: CollectionMutatorRef,
+   }
+
+   struct ToadStore has key {
+      inner: Table<TokenId, OldToken>,
+   }
+
+   public fun initialize_v2_collection(
+      creator: &signer,
+      v1_collection_name: String,
+      v2_collection_name: String,
+      v2_collection_description: String,
+      v2_collection_uri: String,
+      new_royalty_numerator: u64,
+      new_royalty_denominator: u64,
+      treasury_address: address,
+      root_hash: vector<u8>,
+      v2_trait_collection_name: String,
+      v2_trait_collection_description: String,
+      v2_trait_collection_uri: String,
+      v2_trait_types: vector<String>,
+      v2_trait_names: vector<String>,
+      v2_trait_symbols: vector<String>,
+      v2_trait_uris: vector<String>,
+   ) acquires ToadCollectionConfig {
+      let creator_addr = signer::address_of(creator);
+      lilypad::assert_lilypad_exists(creator_addr);
+      let (resource_signer, resource_addr) = lilypad::internal_get_resource_signer_and_addr(creator_addr);
+
+      // ensures the original collection exists (and is, by implication, owned by `resource_signer`)
+      token_v1::check_collection_exists(resource_addr, v1_collection_name);
+
+      // check maximums and supplies
+      let maximum = *option::extract(token_v1::get_collection_maximum(resource_addr, v1_collection_name));
+      let supply = *option::extract(token_v1::get_collection_supply(resource_addr, v1_collection_name));
+      assert!(maximum == supply, error::invalid_state(EMAX_NOT_SUPPLY));
+      assert!(maximum == MAXIMUM_SUPPLY, error::invalid_state(EMAXIMUM_DOES_NOT_MATCH));
+
+      let royalty_obj = royalty::create(new_royalty_numerator, new_royalty_denominator, treasury_address);
+
+      // create the collection & get its constructor ref
+      let toad_collection_constructor_ref = collection_v2::create_fixed_collection(
+         &resource_signer,
+         v2_collection_description,
+         MAXIMUM_SUPPLY,
+         v2_collection_name,
+         royalty_obj,
+         v2_collection_uri,
+      );
+
+      // create object reference and refs from constructor_ref
+      let toad_collection_object = object::object_from_constructor_ref<Collection>(&toad_collection_constructor_ref);
+      let extend_ref = object::generate_extend_ref(&toad_collection_constructor_ref);
+      let transfer_ref = object::generate_transfer_ref(&toad_collection_constructor_ref);
+      let mutator_ref = collection_v2::generate_mutator_ref(&toad_collection_constructor_ref);
+
+      // store misc info in collection config for bookkeeping as well as the collection object refs
+      // this also creates & stores the merkle tree root hash, which is our validator for
+      // image URLs created from a hash of the concatenation of all `TRAIT_TYPE::TRAIT_NAME`s
+      move_to(
+         &resource_signer,
+         ToadCollectionConfig {
+            unmigrated_v1_tokens: MAXIMUM_SUPPLY,
+            migrated_v1_tokens: 0,
+            v1_collection: v1_collection_name,
+            v2_collection: v2_collection_name,
+            v2_collection_object: toad_collection_object,
+            extend_ref: extend_ref,
+            transfer_ref: transfer_ref,
+            mutator_ref: mutator_ref,
+            merkle_tree: merkle_tree::new(root_hash),
+         }
+      );
+
+      // add the creator_addr to the resource address so we can obtain it easily
+      lilypad::add_creator_addr_to_resource_signer(creator);
+
+      let trait_collection_constructor_ref = initialize_trait_collection(
+         resource_signer,
+         v2_trait_collection_name,
+         v2_trait_collection_description,
+         v2_trait_collection_uri,
+         royalty_obj,
+      );
+
+      let trait_collection_object = object::object_from_constructor_ref<Collection>(&trait_collection_constructor_ref);
+
+      create_base_traits(
+         resource_signer,
+         resource_addr,
+         trait_collection_object,
+         v2_trait_types,
+         v2_trait_names,
+         v2_trait_symbols,
+         v2_trait_uris,
+      );
+
+      assert_is_ready_for_migration(resource_addr, v1_collection_name, v2_collection_name);
+   }
+
+   public fun get_collection_name(): String {
+      str(COLLECTION_NAME)
+   }
+
+   fun initialize_trait_collection(
+      resource_signer: &signer,
+      v2_trait_collection_name: String,
+      v2_trait_collection_description: String,
+      v2_trait_collection_uri: String,
+      royalty_obj: Object<Royalty>,
+   ): &ConstructorRef {
+       // create the collection & get its constructor ref
+      let collection_constructor_ref = collection_v2::create_unlimited_collection(
+         &resource_signer,
+         v2_trait_collection_description,
+         v2_trait_collection_name,
+         royalty_obj,
+         v2_trait_collection_uri,
+      );
+
+      // create object reference and refs from constructor_ref
+      let collection_object = object::object_from_constructor_ref<Collection>(&collection_constructor_ref);
+      let extend_ref = object::generate_extend_ref(&collection_constructor_ref);
+      let transfer_ref = object::generate_transfer_ref(&collection_constructor_ref);
+      let mutator_ref = collection_v2::generate_mutator_ref(&collection_constructor_ref);
+
+      // store misc info in collection config for bookkeeping as well as the collection object refs
+      move_to(
+         &resource_signer,
+         TraitCollectionConfig {
+            v2_collection: v2_trait_collection_name,
+            v2_collection_object: collection_object,
+            extend_ref: extend_ref,
+            transfer_ref: transfer_ref,
+            mutator_ref: mutator_ref,
+         }
+      );
+
+      &collection_constructor_ref
+   }
+
+   fun store_toad(
+      resource_signer: &signer,
+      token: OldToken,
+   ) acquires ToadStore {
+      let resource_addr = signer::address_of(resource_signer);
+      assert!(exists<ToadStore>(resource_addr), error::invalid_state(ETOAD_STORE_DOES_NOT_EXIST));
+      let toad_store = borrow_global_mut<ToadStore>(resource_addr);
+      table::add(&mut toad_store.inner, token.id, token);
+   }
+
+   #[view]
+   public fun get_merkle_tree(
+      resource_addr: address,
+   ): MerkleTree acquires ToadCollectionConfig {
+      borrow_global<ToadCollectionConfig>(resource_addr).merkle_tree
+   }
 
    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -926,20 +1302,16 @@ module pond::toad_v2 {
         let concatenated_trait_bytes = *string::bytes(&concatenated_trait_string);
         let internally_verified_leaf_hash = hash::sha3_256(concatenated_trait_bytes);
 
-        let merkle_tree = &borrow_global<MigrationConfig>.merkle_tree;
-
-        let is_valid_proof = merkle_tree::verify_proof(
+        let merkle_tree = get_merkle_tree();
+        merkle_tree::assert_verify_proof(
             merkle_tree,
             internally_verified_leaf_hash,
             proof
         );
-        assert!(is_valid_proof, error::invalid_argument(EINVALID_PROOF));
-
 
         std::debug::print(&concatenated_trait_string);
         internally_verified_leaf_hash
     }
-
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1143,6 +1515,164 @@ module pond::toad_v2 {
                 unequipped_trait,
             }
         );
+    }
+
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////                                                                   ///////////////////////
+    ///////////////////////                            trait combo                            ///////////////////////
+    ///////////////////////                                                                   ///////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    // Can't have
+
+    #[view]
+    public fun get_address_combo(
+        resource_address: address,
+        leaf_hash: vector<u8>,
+    ): address {
+        let seed = copy leaf_hash;
+        vector::append(&mut seed, COMBO_SALT);
+        object::create_object_address(&resource_address, seed)
+    }
+
+    #[view]
+    public fun trait_combo_exists(
+        at: address,
+    ): (bool) {
+        exists<UniqueCombination>(obj_addr)
+    }
+
+    #[view]
+    public fun trait_combo_in_use(
+        at: address,
+        resource_addr: address,
+    ): bool {
+        assert!(trait_combo_exists(at), error::invalid_argument(ETRAIT_COMBO_DOES_NOT_EXIST));
+        !object::is_owner(at, resource_addr)
+    }
+
+    #[view]
+    public fun get_num_combo_objects(
+        resource_addr: address,
+    ): u64 {
+        borrow_global<Preconditions>(resource_addr).num_combo_objects
+    }
+
+    /// This function tries to create the unique combo object
+    /// If it fails, it uses the existing combo address for the combo object reference
+    /// It then transfers the existing combo object to the resource address
+    /// and transfers the new combo object to the toad object.
+    fun try_unique_combination(
+        leaf_hash: vector<u8>,
+        image_uri: String,
+        resource_address: address,
+        toad_obj: Object<Aptoad>,
+        abort_if_exists: bool,
+    ) acquires UniqueCombination, Aptoad {
+        let creator_addr = lilypad::get_creator_addr(resource_address);
+        let (resource_signer, resource_address) = internal_get_resource_signer_and_addr(creator_addr);
+        let trait_combo_obj = try_create_unique_combination(
+                leaf_hash,
+                image_uri,
+                resource_address,
+                abort_if_exists,
+        );
+        update_combo_owners(
+            trait_combo_obj,
+            resource_address,
+            toad_obj,
+        );
+    }
+
+    /// This function creates a unique combination object from the given toad object and its traits.
+    /// Each combo object is created by the resource signer, can be found with `get_address_combo(...)`
+    /// Each unique combination is an object and it represents a slot in a global
+    /// pseudo-dictionary of combination data.
+    /// Does not verify the existence of the combination in the merkle tree, merely creates/uses it.
+    inline fun try_create_unique_combination(
+        leaf_hash: vector<u8>,
+        image_uri: String,
+        resource_addr: address,
+        abort_if_exists: bool,
+    ): Object<UniqueCombination> acquires UniqueCombination {
+        let creator_addr = lilypad::get_creator_addr(resource_addr);
+        let (resource_signer, resource_address) = internal_get_resource_signer_and_addr(creator_addr);
+        let trait_combo_address = get_address_combo(&resource_address, leaf_hash);
+        if (abort_if_exists) {
+            assert!(!trait_combo_exists(trait_combo_address),
+                error::invalid_state(ETRAIT_COMBO_ALREADY_EXISTS));
+        };
+
+        let constructor_ref = object::create_named_object(resource_signer, leaf_hash);
+        let transfer_ref = object::generate_transfer_ref(&constructor_ref);
+        let extend_ref = object::generate_extend_ref(&constructor_ref);
+        let object_signer = object::generate_signer(&constructor_ref);
+
+        object::disable_ungated_transfer(&transfer_ref);
+
+        move_to(
+            &object_signer,
+            UniqueCombination {
+                image_uri,
+                transfer_ref,
+                extend_ref,
+                event_handle: event_handle,
+            }
+        );
+
+        let num_objs = borrow_global_mut<Preconditions>(trait_combo_address).num_combo_objects;
+        *num_objs = *num_objs + 1;
+
+        object::object_from_constructor_ref<UniqueCombination>(&constructor_ref)
+    }
+
+    inline fun get_event_handle(
+        trait_combo_address: address,
+    ): &EventHandle<CreateUniqueCombinationEvent> acquires UniqueCombination {
+        &borrow_global_mut<UniqueCombination>(trait_combo_address).event_handle
+    }
+
+    inline fun get_transfer_ref(
+        trait_combo_address: address,
+    ): &TransferRef acquires UniqueCombination {
+        &borrow_global_mut<UniqueCombination>(trait_combo_address).event_handle
+    }
+
+    /// The Aptoad Token Object must exist at this point.
+    /// This changes the owner of the existing, in use Combo Object from the Aptoad to the resource address
+    /// And changes the owner of the (possibly) new Combo Object to the Aptoad from the resource addr
+    inline fun update_combo_owners(
+        new_combo_object: Object<UniqueCombination>,
+        resource_addr: address,
+        toad_obj: Object<Aptoad>,
+    ) acquires UniqueCombination, Aptoad {
+        assert!(trait_combo_exists(new_combo_object), error::not_found(ETRAIT_COMBO_DOES_NOT_EXIST));
+
+        // transfer the existing combo object to the resource_addr
+        let existing_combo_object = get_unique_combination(toad_obj);
+
+        if (existing_combo_object == new_combo_object) {
+            return
+        };
+
+        // the toad should own the previous/existing combo object
+        assert!(object::is_owner(existing_combo_object, toad_obj), error::invalid_state(EINVALID_STATE));
+        let existing_combo_object_transfer_ref = get_transfer_ref(existing_combo_object);
+        object::transfer_with_ref(
+            object::generate_linear_transfer_ref(existing_combo_object_transfer_ref, resource_addr)
+        );
+
+        // resource_addr should own the new trait combo object
+        assert!(object::is_owner(new_combo_object, resource_addr), error::invalid_state(EINVALID_STATE));
+        object::transfer_ref(
+            object::generate_linear_transfer_ref(get_transfer_ref(new_combo_object), toad_obj)
+        );
+
+        set_unique_combination(toad_obj, new_combo_object);
     }
 
     /////////////////////////////////////////////////////////////////////////////////////////////////////////////////

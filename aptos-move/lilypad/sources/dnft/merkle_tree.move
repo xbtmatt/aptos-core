@@ -1,10 +1,9 @@
 module pond::merkle_tree {
-	use std::signer;
 	use std::vector;
 	use std::error;
 	use std::hash;
 
-	struct MerkleTree has store {
+	struct MerkleTree has copy, store {
 		root_hash: vector<u8>,
 	}
 
@@ -18,6 +17,8 @@ module pond::merkle_tree {
 	const EFLAG_NOT_PRESENT: u64 = 3;
 	/// The hash length isn't 32 bytes.
 	const EINCORRECT_HASH_LENGTH: u64 = 4;
+	/// The provided proof is not valid.
+	const EINVALID_PROOF: u64 = 5;
 
 	/// a sha3_256 hash is a vector<u8> of 32 elements
 	const HASH_LENGTH: u64 = 32;
@@ -52,6 +53,14 @@ module pond::merkle_tree {
 		});
 
 		(current_hash == merkle_tree.root_hash)
+	}
+
+	public fun assert_verify_proof(
+		merkle_tree: &MerkleTree,
+		leaf_hash: vector<u8>,
+		proof: vector<vector<u8>>,
+	) {
+		assert!(verify_proof(merkle_tree, leaf_hash, proof), error::invalid_argument(EINVALID_PROOF));
 	}
 
 	public inline fun destroy(
