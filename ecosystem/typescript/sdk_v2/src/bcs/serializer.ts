@@ -10,11 +10,9 @@ import {
   MAX_U8_NUMBER,
   MAX_U256_BIG_INT,
 } from "./consts";
-import { AnyNumber, Uint16, Uint32, Uint8 } from "./types";
-
-export interface Serializable {
-  serialize(serializer: Serializer): void;
-}
+import { Deserializer } from "./deserializer";
+import { Serializable } from "./serializable";
+import { AnyNumber, Uint8, Uint16, Uint32, Uint64, Uint128, Uint256 } from "./types";
 
 export class Serializer {
   private buffer: ArrayBuffer;
@@ -268,7 +266,29 @@ export class Serializer {
     // Serializable interface, not the one defined in this class.
     value.serialize(this);
   }
+
+  serializeVector<T extends Serializable>(values: Array<T>) {
+    this.serializeU32AsUleb128(values.length);
+    values.forEach((item) => {
+      item.serialize(this);
+    });
+  }
+
+
+  // serializeAny(value: SerializableInput) {
+  //   switch (typeof value) {
+  //     case 'string':
+  //       this.serializeStr(value);
+  //       break;
+  //     case 'boolean':
+  //       this.serializeBool(value);
+  //       break;
+  //     case 'Uint8':
+  //       this.serializeU8(value);
+  //   }
+  // }
 }
+
 
 /**
  * A decorator that ensures the input argument for a function is within a range.

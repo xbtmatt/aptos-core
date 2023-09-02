@@ -190,8 +190,8 @@ export class Deserializer {
   }
 
   /**
-   * This function deserializes a Deserializable value. The bytes must be loaded into the Serializer already.
-   * Note that it does not take in the value, it takes in the class type of the value that implements Serializable.
+   * Deserializes a BCS Deserializable value. The serialized bytes must be loaded into the Deserializer already.
+   * Note that it does not take in the value, it takes in the class type of the value that implements the deserialize function.
    *
    * The process of using this function is as follows:
    * 1. Serialize the value of class type T using its `serialize` function.
@@ -256,5 +256,17 @@ export class Deserializer {
     // NOTE: The `deserialize` method called by `cls` is defined in the `cls`'s
     // Deserializable interface, not the one defined in this class.
     return cls.deserialize(this);
+  }
+
+  /**
+   * Deserializes an array of BCS Deserializable values. The serialized bytes must be loaded into the Deserializer already.
+   */
+  deserializeVector<T>(cls: Deserializable<T>): Array<T> {
+    const length = this.deserializeUleb128AsU32();
+    const vector = new Array<T>();
+    for (let i = 0; i < length; i++) {
+      vector.push(this.deserialize(cls));
+    }
+    return vector;
   }
 }
