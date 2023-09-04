@@ -3,11 +3,8 @@
 
 /* eslint-disable no-bitwise */
 import { MAX_U32_NUMBER } from "./consts";
+import { Deserializable } from "./serializable";
 import { Uint128, Uint16, Uint256, Uint32, Uint64, Uint8 } from "./types";
-
-export interface Deserializable<T> {
-  deserialize(deserializer: Deserializer): T;
-}
 
 export class Deserializer {
   private buffer: ArrayBuffer;
