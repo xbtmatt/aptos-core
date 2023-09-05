@@ -3,8 +3,11 @@
 
 /* eslint-disable no-bitwise */
 import { MAX_U32_NUMBER } from "./consts";
-import { Deserializable } from "./serializable";
 import { Uint128, Uint16, Uint256, Uint32, Uint64, Uint8 } from "./types";
+
+export interface Deserializable<T> {
+  deserialize(deserializer: Deserializer): T;
+}
 
 export class Deserializer {
   private buffer: ArrayBuffer;
@@ -187,8 +190,9 @@ export class Deserializer {
   }
 
   /**
-   * Deserializes a BCS Deserializable value. The serialized bytes must be loaded into the Deserializer already.
-   * Note that it does not take in the value, it takes in the class type of the value that implements the deserialize function.
+   * Deserializes a BCS Deserializable value.
+   *
+   * The serialized bytes must already be in the Deserializer buffer.
    *
    * The process of using this function is as follows:
    * 1. Serialize the value of class type T using its `serialize` function.
@@ -256,12 +260,14 @@ export class Deserializer {
   }
 
   /**
-   * Deserializes an array of BCS Deserializable values. The serialized bytes must be loaded into the Deserializer already.
+   * Deserializes an array of BCS Deserializable values.
+   *
+   * The serialized bytes must already be loaded into the Deserializer buffer.
    */
   deserializeVector<T>(cls: Deserializable<T>): Array<T> {
     const length = this.deserializeUleb128AsU32();
     const vector = new Array<T>();
-    for (let i = 0; i < length; i++) {
+    for (let i = 0; i < length; i += 1) {
       vector.push(this.deserialize(cls));
     }
     return vector;

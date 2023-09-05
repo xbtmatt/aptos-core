@@ -10,9 +10,20 @@ import {
   MAX_U8_NUMBER,
   MAX_U256_BIG_INT,
 } from "./consts";
-import { Deserializer } from "./deserializer";
-import { Serializable } from "./serializable";
-import { AnyNumber, Uint8, Uint16, Uint32, Uint64, Uint128, Uint256 } from "./types";
+import { AnyNumber, Uint8, Uint16, Uint32 } from "./types";
+
+// Instead of enums, we can use classes that implement Serializable, to facilitate composable serialization.
+// This lets us serialize vectors and nested objects/types very easily. They will all implement the
+// Serializable interface, so we can just call serialize on them.
+export abstract class Serializable {
+  abstract serialize(serializer: Serializer): void;
+
+  toUint8Array(): Uint8Array {
+    const serializer = new Serializer();
+    this.serialize(serializer);
+    return serializer.toUint8Array();
+  }
+}
 
 export class Serializer {
   private buffer: ArrayBuffer;
@@ -273,22 +284,7 @@ export class Serializer {
       item.serialize(this);
     });
   }
-
-
-  // serializeAny(value: SerializableInput) {
-  //   switch (typeof value) {
-  //     case 'string':
-  //       this.serializeStr(value);
-  //       break;
-  //     case 'boolean':
-  //       this.serializeBool(value);
-  //       break;
-  //     case 'Uint8':
-  //       this.serializeU8(value);
-  //   }
-  // }
 }
-
 
 /**
  * A decorator that ensures the input argument for a function is within a range.

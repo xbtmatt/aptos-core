@@ -4,6 +4,7 @@
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
 import { HexInput } from "../types";
 import { ParsingError, ParsingResult } from "./common";
+import { Deserializer, Serializable, Serializer } from "../bcs";
 
 /**
  * This enum is used to explain why an address was invalid.
@@ -34,7 +35,7 @@ export enum AddressInvalidReason {
  * The comments in this class make frequent reference to the LONG and SHORT formats,
  * as well as "special" addresses. To learn what these refer to see AIP-40.
  */
-export class AccountAddress {
+export class AccountAddress extends Serializable {
   /*
    * This is the internal representation of an account address.
    */
@@ -64,6 +65,7 @@ export class AccountAddress {
    * @param args.data A Uint8Array representing an account address.
    */
   constructor(args: { data: Uint8Array }) {
+    super();
     if (args.data.length !== AccountAddress.LENGTH) {
       throw new ParsingError(
         "AccountAddress data should be exactly 32 bytes long",
@@ -359,5 +361,38 @@ export class AccountAddress {
   equals(other: AccountAddress): boolean {
     if (this.data.length !== other.data.length) return false;
     return this.data.every((value, index) => value === other.data[index]);
+  }
+
+  /**
+   * Serializes an AccountAddress
+   *
+   * NOTE: If you are looking to serialize an AccountAddress and get the bytes in the same call,
+   * please use the .toUint8Array() function.
+   *
+   * @example
+   * const serializer = new Serializer();
+   * const accountAddress = AccountAddress.fromHexInput({ input: "0x1" });
+   * accountAddress.serialize(serializer);
+   * const accountAddressBcsBytes = serializer.toUint8Array();
+   * // or
+   * const accountAddressBcsBytes = accountAddress.toUint8Array();
+   * @param serializer: the Serializer instance to serialize bytes to
+   * @returns a Uint8Array of the serialized AccountAddress
+   */
+  serialize(serializer: Serializer): void {
+    serializer.serializeFixedBytes(this.data);
+  }
+
+  /**
+   * Deserializes an AccountAddress
+   *
+   * @param deserializer: the Deserializer instance to deserialize bytes from
+   * @returns an AccountAddress instance
+   * @throws Error if bytes are invalid
+   * @example
+   * const accountAddress = AccountAddress.deserialize(deserializer);
+   */
+  static deserialize(deserializer: Deserializer): AccountAddress {
+    return new AccountAddress({ data: deserializer.deserializeFixedBytes(AccountAddress.LENGTH) });
   }
 }
