@@ -3,7 +3,13 @@ import { MoveFunction, MoveStruct } from "./generated";
 
 export { Transaction } from "./generated";
 
-export type AnyNumber = number | bigint;
+export type Uint8 = number;
+export type Uint16 = number;
+export type Uint32 = number;
+export type Uint64 = bigint;
+export type Uint128 = bigint;
+export type Uint256 = bigint;
+export type AnyNumber = bigint | number;
 export type HexInput = string | Uint8Array;
 
 export type AptosSettings = {
