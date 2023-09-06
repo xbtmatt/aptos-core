@@ -5,12 +5,12 @@
 import {
   MAX_U128_BIG_INT,
   MAX_U16_NUMBER,
+  MAX_U256_BIG_INT,
   MAX_U32_NUMBER,
   MAX_U64_BIG_INT,
   MAX_U8_NUMBER,
-  MAX_U256_BIG_INT,
-} from "./consts";
-import { AnyNumber, Uint8, Uint16, Uint32 } from "./types";
+} from "../utils/const";
+import { AnyNumber, Uint8, Uint16, Uint32 } from "../types";
 
 // Instead of enums, we can use classes that implement Serializable, to facilitate composable serialization.
 // This lets us serialize vectors and nested objects/types very easily. They will all implement the
