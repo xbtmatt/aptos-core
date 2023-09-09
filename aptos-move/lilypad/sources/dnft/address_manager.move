@@ -1,4 +1,4 @@
-module swap::address_manager {
+module pond::address_manager {
     use aptos_std::smart_table::{Self, SmartTable};
     use std::string::String;
 

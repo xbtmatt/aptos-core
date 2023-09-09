@@ -805,7 +805,7 @@ module pond::lilypad {
 		creator: &signer,
 	) acquires LilypadCollectionData {
 		let creator_addr = signer::address_of(creator);
-		let (resource_signer, resource_address) = internal_get_resource_signer_and_addr(creator_addr);
+		let (resource_signer, _) = internal_get_resource_signer_and_addr(creator_addr);
 		move_to(
 			&resource_signer,
 			OriginalCreatorAddress {
