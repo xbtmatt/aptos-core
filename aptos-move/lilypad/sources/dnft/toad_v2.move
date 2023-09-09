@@ -7,10 +7,10 @@ module pond::toad_v2 {
     use std::string::{Self, String, utf8 as str};
     use std::option::{Self, Option};
     use aptos_std::string_utils;
-    use aptos_std::type_info;
-    use aptos_framework::primary_fungible_store;
+    use aptos_framework::primary_fungible_store::{self, FungibleStore};
     use aptos_framework::fungible_asset::{Self, MintRef, BurnRef};
     use std::vector;
+    use std::account;
     use std::signer;
     use std::hash;
     use std::error;
@@ -78,6 +78,7 @@ module pond::toad_v2 {
 
     struct MigrationEvent has copy, drop, store {
         creator: address,
+        owner: address,
         old_collection_name: String,
         new_collection_name: String,
         new_collection: Object<Collection>,
@@ -231,6 +232,7 @@ module pond::toad_v2 {
         resource_signer: &signer,
         resource_addr: address,
         collection_object: Object<Collection>,
+        owner: &signer,
         token: OldToken,
         keys: vector<String>,
         values: vector<String>,
@@ -266,9 +268,11 @@ module pond::toad_v2 {
         let base_toad_object = object::object_from_constructor_ref(&constructor_ref);
 
         initialize_event_store(token_signer);
+        let owner_addr = signer::address_of(owner);
         emit_migration_event(
             token_signer,
             creator_addr,
+            owner_addr,
             collection_name,
             collection_name,
             collection_object,
@@ -317,10 +321,14 @@ module pond::toad_v2 {
             abort_if_exists,
         );
 
+        // For clarity's sake, note that create_v2_traits just returns
+        // if it's perfect or not so that we don't have to check again with a separate call.
+        // It creates the trait regardless of whether or not it's perfect.
         let is_verified_perfect = create_v2_traits(
             resource_signer,
             resource_addr,
             collection_object,
+            owner,
             base_toad_object,
             keys,
             values
@@ -335,18 +343,29 @@ module pond::toad_v2 {
         move_to(
             token_signer,
             EventHandles {
-                equip_event: event::new_event_handle<EquipEvent>(token_signer),
-                unequip_event: event::new_event_handle<UnequipEvent>(token_signer),
-                migration_events: event::new_event_handle<MigrationEvent>(token_signer),
-                new_combination_events: event::new_event_handle<NewCombinationEvent>(token_signer),
+                equip_events: account::new_event_handle<EquipEvent>(token_signer),
+                unequip_events: account::new_event_handle<UnequipEvent>(token_signer),
+                migration_events: account::new_event_handle<MigrationEvent>(token_signer),
+                new_combination_events: account::new_event_handle<NewCombinationEvent>(token_signer),
             }
         );
+    }
+
+    inline fun mint_and_equip<T>(
+        owner: &signer,
+        trait_name: String,
+        base_toad_object: Object<Aptoad>,
+    ) {
+        owner_addr = signer::address_of(owner);
+        internal_mint_trait_and_deposit<T>(owner_addr, trait_name);
+        equip_trait<T>(owner, trait_name, base_toad_object);
     }
 
     fun create_v2_traits(
         resource_signer: &signer,
         resource_addr: address,
         collection_object: Object<Collection>,
+        owner: &signer,
         base_toad_object: Object<Aptoad>,
         keys: vector<String>,
         values: vector<String>,
@@ -363,33 +382,18 @@ module pond::toad_v2 {
             } else if (tr_type == str(BODY)) {
                 body = tr_name;
             } else if (tr_type == str(CLOTHING)) {
-                equip_trait(
-                    base_toad_object,
-                    internal_mint_trait<Clothing>()
-                );
+                mint_and_equip<Clothing>(owner, trait_name, base_toad_object);
             } else if (tr_type == str(HEADWEAR)) {
-                equip_trait(
-                    base_toad_object,
-                    internal_mint_trait<Headwear>()
-                );
+                mint_and_equip<Headwear>(owner, trait_name, base_toad_object);
             } else if (tr_type == str(EYEWEAR)) {
-                equip_trait(
-                    base_toad_object,
-                    internal_mint_trait<Eyewear>()
-                );
+                mint_and_equip<Eyewear>(owner, trait_name, base_toad_object);
             } else if (tr_type == str(MOUTH)) {
-                equip_trait(
-                    base_toad_object,
-                    internal_mint_trait<Mouth>()
-                );
+                mint_and_equip<Mouth>(owner, trait_name, base_toad_object);
             } else if (tr_type == str(FLY)) {
-                equip_trait(
-                    base_toad_object,
-                    internal_mint_trait<Fly>()
-                );
+                mint_and_equip<Fly>(owner, trait_name, base_toad_object);
             } else {
                 // do nothing, could throw an error here to be extra safe...ok I'll do it.
-                error::invalid_state(EINVALID_PROPERTY_MAP_KEY);
+                abort error::invalid_state(EINVALID_PROPERTY_MAP_KEY);
             };
         };
 
@@ -398,27 +402,6 @@ module pond::toad_v2 {
 
         let perfect = (num_traits == 2);
         (perfect)
-    }
-
-    /// transfer the object from the toad object to its owner and set `allow_ungated_transfer`
-    fun internal_transfer<T>(
-        trait_obj: Object<T>,
-        to: address,
-        allow_ungated_transfer: bool,
-    ) {
-        assert!(object::is_owner(trait_obj, to), error::permission_denied(ENOT_OWNER));
-        assert!(exists<Refs>(object::object_address(trait_obj)), error::not_found(EOBJECT_DOES_NOT_HAVE_REFS));
-
-        let transfer_ref = &borrow_global<Refs>(object_address).transfer_ref;
-
-        if (allow_ungated_transfer) {
-            object::enable_ungated_transfer(transfer_ref);
-        } else {
-            object::disable_ungated_transfer(transfer_ref);
-        };
-
-        let linear_transfer_ref = object::generate_linear_transfer_ref(transfer_ref);
-        object::transfer_with_ref(linear_transfer_ref);
     }
 
     /// stores the refs and returns the signer for convenience
@@ -442,7 +425,15 @@ module pond::toad_v2 {
         object_signer
     }
 
-
+   /// This function is for creating base fungible assets for each trait type.
+   /// As of right now there are only 5, and it expects
+   /// all 4 vectors to be of the same length.
+   /// This means you'll use one trait type for all of its individual trait names
+   /// e.g.
+   /// Glasses, Zuck Goggles, Trait Symbol 1, Trait Uri 1
+   /// Glasses, Other Glasses, Trait Symbol 2, Trait Uri 2
+   /// Glasses, Other Glasses 2, Trait Symbol 3, Trait Uri 3
+   /// etc
    fun create_base_traits(
       resource_signer: &signer,
       resource_addr: address,
@@ -481,8 +472,39 @@ module pond::toad_v2 {
       };
    }
 
-    /// This function creates a fungible token for each trait type + trait name.
-    /// That is, each Eyewear trait: "Zuck Goggles", "Cool Shades", etc- will have its own fungible token.
+
+    // The fungible asset metadata for each trait_type::trait_name combo
+    // is stored in the address_manager smart table under the key "trait_type::trait_name"
+    // i.e. "Eyewear: Zuck Goggles"
+    #[view]
+    public fun get_base_fungible_trait_metadata_address(
+        trait_type: String,
+        trait_name: String,
+    ): address {
+        let trait_id = copy trait_type;
+        // "Eyewear: Zuck Goggles"
+        string::append_utf8(&mut trait_id, str(b": "));
+        string::append_utf8(&mut trait_id, trait_name);
+
+        address_manager::get_address_name(trait_id)
+    }
+
+    inline fun get_base_fungible_trait_metadata_address_from_type<T>(
+        trait_name: String,
+    ): address {
+        let trait_type = trait_type_to_string<T>();
+        get_base_fungible_trait_metadata_address(
+            trait_type,
+            trait_name
+        )
+    }
+
+    /// This function creates a Digital Fungible Asset for each
+    /// trait type + trait name.
+    /// That is, each Eyewear trait:
+    /// "Zuck Goggles", "Cool Shades", etc will be its own DFA.
+    /// with a fungible asset metadata object, a Token object, and
+    /// its own internal supply.
     fun create_base_fungible_trait(
         resource_signer: &signer,
         resource_addr: address,
@@ -493,18 +515,29 @@ module pond::toad_v2 {
         image_uri: String,
     ) {
         let collection_name = collection_v2::name(collection_object);
+        let trait_id = copy trait_type;
+        // "Eyewear: Zuck Goggles"
+        string::append_utf8(&mut trait_id, str(b": "));
+        string::append_utf8(&mut trait_id, trait_name);
+
         let token_address = token_v2::create_token_address(
             &resource_addr,
             &collection_name,
-            &trait_name
+            &trait_id
         );
+
+        // store the token address in our address_manager
+        address_manager::add_address(trait_id, token_address);
+
+        // the base trait must not already exist
         assert!(object::is_object(token_address), error::invalid_state(ETRAIT_TYPE_ALREADY_EXISTS));
+
 
         let constructor_ref = token_v2::create_named_token(
             resource_signer,
             collection_name,
             get_trait_description(trait_type, trait_name),
-            trait_name,
+            trait_id, // token name, i.e., `trait_type: trait_name`
             option::none(), // using collection wide royalties
             image_uri,
         );
@@ -539,6 +572,8 @@ module pond::toad_v2 {
             move_to(token_signer, Mouth { });
         } else if (trait_type == trait_type_to_string<Fly>()) {
             move_to(token_signer, Fly { });
+        } else {
+            abort error::invalid_state(EINVALID_STATE)
         };
     }
 
@@ -562,26 +597,29 @@ module pond::toad_v2 {
         has_basic_refs(obj_addr) && has_fungible_refs(obj_addr)
     }
 
-    fun assert_trait_object<T>(
-        trait_object: Object<T>,
+    fun assert_is_trait_object<T>(
+        trait_object: &Object<T>,
     ) {
-        let obj_addr = object::object_address<Token>(trait_object);
+        let obj_addr = object::object_address<T>(trait_object);
+        assert!(exists<T>(obj_addr), error::invalid_argument(EINVALID_TRAIT_TYPE));
         assert!(has_basic_refs(obj_addr), error::invalid_argument(EOBJECT_DOES_NOT_HAVE_REFS));
         assert!(has_fungible_refs(obj_addr), error::invalid_argument(EOBJECT_DOES_NOT_HAVE_FUNGIBLE_REFS));
     }
 
-    fun internal_mint_trait<T>(trait_object: Object<Token>): Object<T> {
-        assert_trait_object(trait_object);
-        let trait_object_addr = object::object_address<Token>(trait_object);
-        let token_signer = object::generate_signer_for_extending(&borrow_global<Refs>(trait_object_addr).extend_ref);
+    inline fun internal_mint_trait_and_deposit<T>(owner_addr: address, trait_name: String) {
+        let trait_object_addr = get_base_fungible_trait_metadata_address_from_type<T>(trait_name);
+        let trait_object = object::address_to_object<T>(trait_object_addr);
+        assert_is_trait_object<T>(&trait_object);
         let mint_ref = &borrow_global<FungibleRefs>(trait_object_addr).mint_ref;
-        let fungible_store =
+        let transfer_ref = &borrow_global<Refs>(trait_object_addr).transfer_ref;
 
-        // TODO: Create the primary fungible store at user's address upon using/minting?
-        //       Figure out how this is supposed to work, ask Aaron
-
-        fungible_asset::mint(mint_ref, fungible_store, 1);
-        object::address_to_object(signer::address_of(&token_signer))
+        let owner_fungible_store = primary_fungible_store::ensure_primary_store_exists(owner_addr, trait_object);
+        let fungible_trait_asset = fungible_asset::mint(mint_ref, 1);
+        fungible_asset::deposit_with_ref(
+            transfer_ref,
+            owner_fungible_store,
+            fungible_trait_asset
+        );
     }
 
     /// intended to only be used by the singular equip
@@ -589,22 +627,15 @@ module pond::toad_v2 {
     public entry fun equip_and_update<T: key>(
         owner: &signer,
         toad_object: Object<Aptoad>,
-        obj_to_equip: Object<T>,
+        trait_object: Object<T>,
+        trait_name: String,
         unvalidated_image_uri: String,
         proof: vector<vector<u8>>,
     ) acquires Aptoad, Clothing, Headwear, Eyewear, Mouth, Fly {
-        assert!(exists<Aptoad>(toad_object), error::invalid_argument(ENOT_A_TOAD));
         let owner_addr = signer::address_of(owner);
-        assert!(object::is_owner(toad_object, owner_addr), error::permission_denied(ENOT_OWNER));
-        assert!(object::is_owner(obj_to_equip, owner_addr), error::permission_denied(ENOT_OWNER));
-        assert!(exists<T>(obj_to_equip), error::invalid_argument(EINVALID_TRAIT_TYPE));
-        // may have to use this if the compiler gets mad at the previous line
-        // TODO: Remove this or remove above
-        assert!(is_a_trait_type(obj_to_equip), error::invalid_argument(EINVALID_TRAIT_TYPE));
-
 
         // make the change before creating the trait map
-        equip_trait<T>(toad_object, obj_to_equip);
+        equip_trait<T>(owner, trait_name, toad_object);
 
         // create the new trait map
         let new_trait_map = get_v2_trait_map(toad_object);
@@ -647,20 +678,19 @@ module pond::toad_v2 {
         );
     }
 
-    /// intended to only be used by the singular equip
+    /// intended to only be used by the singular unequip
     /// this function will fail if there isn't a valid slot to unequip
     public entry fun unequip_and_update<T: key>(
         owner: &signer,
         toad_object: Object<Aptoad>,
+        trait_name: String,
         unvalidated_image_uri: String,
         proof: vector<vector<u8>>,
     ) acquires Aptoad, Clothing, Headwear, Eyewear, Mouth, Fly {
-        assert!(exists<Aptoad>(toad_object), error::invalid_argument(ENOT_A_TOAD));
         let owner_addr = signer::address_of(owner);
-        assert!(object::is_owner(toad_object, owner_addr), error::permission_denied(ENOT_OWNER));
 
         // make the change before creating the trait map
-        unequip_trait<T>(toad_object);
+        unequip_trait<T>(owner, trait_name, toad_object);
 
         // create the new trait map
         let new_trait_map = get_v2_trait_map(toad_object);
@@ -703,54 +733,83 @@ module pond::toad_v2 {
         );
     }
 
-    /// intended to be used by both v1 => v2 creator and future equips/unequips
+    // TODO:
+    // refactor contract so that the Aptoad doesn't have objects stored in its fields
+    // it only needs an indicator, like a boolean or something
+    //
+    // We still want to demonstrate composition though,
+    // so maybe we should eventually add that old idea you had
+    // where you can put a mini toad on another toad's head or a Best Friend field or something
     inline fun equip_trait<T: key>(
+        owner: &signer,
+        trait_name: String,
         toad_object: Object<Aptoad>,
-        obj_to_equip: Object<T>
-    ) acquires Aptoad, Clothing, Headwear, Eyewear, Mouth, Fly {
-        let option_ref = get_trait_option_from_toad<T>(toad_object);
-        /*
-        let option_ref = if (exists<Clothing>(obj_to_equip)) {
-            // let clothing_obj = object::convert<T, Clothing>(obj_to_equip);
-            // option::fill<Object<Clothing>>(&mut toad_obj_resources.clothing, clothing_obj);
-            &mut borrow_global_mut<Aptoad>(toad_object).clothing
-        } else if (exists<Headwear>(obj_to_equip)) {
-            // let headwear_obj = object::convert<T, Headwear>(obj_to_equip);
-            // option::fill<Object<Headwear>>(&mut toad_obj_resources.headwear, headwear_obj);
-            &mut borrow_global_mut<Aptoad>(toad_object).headwear
-        } else if (exists<Eyewear>(obj_to_equip)) {
-            // let eyewear_obj = object::convert<T, Eyewear>(obj_to_equip);
-            // option::fill<Object<Eyewear>>(&mut toad_obj_resources.eyewear, eyewear_obj);
-            &mut borrow_global_mut<Aptoad>(toad_object).eyewear
-        } else if (exists<Mouth>(obj_to_equip)) {
-            // let mouth_obj = object::convert<T, Mouth>(obj_to_equip);
-            // option::fill<Object<Mouth>>(&mut toad_obj_resources.mouth, mouth_obj);
-            &mut borrow_global_mut<Aptoad>(toad_object).mouth
-        } else if (exists<Fly>(obj_to_equip)) {
-            // let fly_obj = object::convert<T, Fly>(obj_to_equip);
-            // option::fill<Object<Fly>>(&mut toad_obj_resources.fly, fly_obj);
-            &mut borrow_global_mut<Aptoad>(toad_object).fly
-        } else {
-            abort error::invalid_argument(EINVALID_TRAIT_TYPE)
-        };
-        */
-
-        assert!(!option::is_some(option_ref), error::invalid_state(ETRAIT_TYPE_ALREADY_EQUIPPED));
-        option::fill<T>(option_ref, obj_to_equip);
-
-        let allow_ungated_transfer = false;
-        emit_equip_event(toad_object, obj_to_equip);
-        internal_transfer(obj_to_equip, toad_object, allow_ungated_transfer);
+    ) {
+        assert!(exists<Aptoad>(toad_object), error::invalid_argument(ENOT_A_TOAD));
+        let owner_addr = signer::address_of(owner);
+        assert!(object::is_owner(toad_object, owner_addr), error::permission_denied(ENOT_OWNER));
+        let aptoad_addr = object::object_address(&toad_object);
+        handle_dfa_transfer<T>(
+            owner,
+            aptoad_addr,
+            toad_object,
+            trait_name,
+            true
+        );
     }
 
     inline fun unequip_trait<T: key>(
+        owner: &signer,
         toad_object: Object<Aptoad>,
+        trait_name: String,
     ) {
-        let obj_to_unequip = get_trait_object_from_toad<T>(toad_object);
+        assert!(exists<Aptoad>(toad_object), error::invalid_argument(ENOT_A_TOAD));
+        let owner_addr = signer::address_of(owner);
+        assert!(object::is_owner(toad_object, owner_addr), error::permission_denied(ENOT_OWNER));
+        let aptoad_signer = internal_get_aptoad_signer(toad_object);
+        handle_dfa_transfer<T>(
+            aptoad_signer,
+            owner_addr,
+            toad_object,
+            trait_name,
+            false
+        );
+    }
 
-        let allow_ungated_transfer = true;
-        emit_unequip_event(toad_object, obj_to_unequip);
-        internal_transfer(object::owner(toad_object), obj_to_unequip, allow_ungated_transfer);
+    // Handles the transferring of the digital fungible asset from one owner to another.
+    // This is used for transferring it from the owner to the toad or vice versa
+    // It also fills/extracts the value depending on if it's an equip or unequip
+    // and handles the corresponding assertions for validating the current state of the toad
+    // and its field corresponding to the requested trait to equip/unequip
+    inline fun handle_dfa_transfer<T: key>(
+        from: &signer,
+        to: address,
+        toad_object: Object<Aptoad>,
+        trait_name: String,
+        is_request_to_equip: bool,
+    ) {
+        let trait_object_addr = get_base_fungible_trait_metadata_address_from_type<T>(trait_name);
+        let trait_object = object::address_to_object<T>(trait_object_addr);
+        assert_is_trait_object<T>(&trait_object);
+
+        let from_addr = signer::address_of(from);
+        let option_ref = get_mut_trait_option_from_toad<T>(toad_object);
+
+        if (is_request_to_equip) {
+            assert!(!option::is_some(option_ref), error::invalid_state(ETRAIT_TYPE_ALREADY_EQUIPPED));
+            emit_equip_event(toad_object, trait_object);
+            option::fill<T>(option_ref, trait_object);
+        } else {
+            assert!(option::is_some(option_ref), error::invalid_state(ETRAIT_TYPE_NOT_EQUIPPED));
+            emit_unequip_event(toad_object, trait_object);
+            option::extract(option_ref);
+        };
+        primary_fungible_store::transfer(
+            from_addr, // from address
+            trait_obj, // fungible asset metadata object
+            to, // to address
+            1 // amount
+        );
     }
 
     /// this should only be run after any change has taken place
@@ -844,6 +903,7 @@ module pond::toad_v2 {
             resource_signer,
             resource_addr,
             collection_object,
+            owner,
             v1_token,
             keys,
             values,
@@ -963,7 +1023,7 @@ module pond::toad_v2 {
     }
 
     #[view]
-    public inline fun get_trait_option_from_toad<T: key>(toad_object: Object<Aptoad>): &Option<Object<T>> acquires Aptoad {
+    public fun get_trait_option_from_toad<T: key>(toad_object: Object<Aptoad>): &Option<Object<T>> acquires Aptoad {
         if (exists<Clothing>(object_address)) {
             &borrow_global<Aptoad>(toad_object).clothing
         } else if (exists<Headwear>(object_address)) {
@@ -974,6 +1034,22 @@ module pond::toad_v2 {
             &borrow_global<Aptoad>(toad_object).mouth
         } else if (exists<Fly>(object_address)) {
             &borrow_global<Aptoad>(toad_object).fly
+        } else {
+            abort error::invalid_argument(EINVALID_TRAIT_TYPE)
+        }
+    }
+
+    fun get_mut_trait_option_from_toad<T: key>(toad_object: Object<Aptoad>): &mut Option<Object<T>> acquires Aptoad {
+        if (exists<Clothing>(object_address)) {
+            &mut borrow_global_mut<Aptoad>(toad_object).clothing
+        } else if (exists<Headwear>(object_address)) {
+            &mut borrow_global_mut<Aptoad>(toad_object).headwear
+        } else if (exists<Eyewear>(object_address)) {
+            &mut borrow_global_mut<Aptoad>(toad_object).eyewear
+        } else if (exists<Mouth>(object_address)) {
+            &mut borrow_global_mut<Aptoad>(toad_object).mouth
+        } else if (exists<Fly>(object_address)) {
+            &mut borrow_global_mut<Aptoad>(toad_object).fly
         } else {
             abort error::invalid_argument(EINVALID_TRAIT_TYPE)
         }
@@ -990,21 +1066,10 @@ module pond::toad_v2 {
     public inline fun get_trait_token_object_from_toad<T: key>(
         toad_object: Object<Aptoad>,
     ): Object<Token> {
-        let trait_object = get_trait_object_from_toad<T>(toad_object);
+        assert!(option::is_some(&option_object), error::invalid_state(ETRAIT_TYPE_NOT_EQUIPPED));
+        let trait_object = *option::borrow(get_trait_option_from_toad<T>(toad_object))
         let token_object = object::convert<T, Token>(trait_object);
         token_object
-    }
-
-    #[view]
-    public inline fun get_trait_object_from_toad<T: key>(
-        toad_object: Object<Aptoad>,
-    ): Object<T> {
-        if (throw_if_empty) {
-            assert!(!option::is_some(&option_object), error::invalid_state(ETRAIT_TYPE_NOT_EQUIPPED));
-        } else {
-            // we could check exists<T>(toad_object) here but our contract is, by design, never allowed to get to that state.
-            *option::borrow(get_trait_option_from_toad<T>(toad_object))
-        }
     }
 
     #[view]
@@ -1530,7 +1595,8 @@ module pond::toad_v2 {
 
     inline fun emit_migration_event(
         token_signer: &signer,
-        creator: address,
+        creator_addr: address,
+        owner_addr: address,
         old_collection_name: String,
         new_collection_name: String,
         new_collection: Object<Collection>,
@@ -1542,7 +1608,8 @@ module pond::toad_v2 {
         event::emit_event(
             &mut event_handles.migration_events,
             MigrationEvent {
-                creator,
+                creator: creator_addr,
+                owner: owner_addr,
                 old_collection_name,
                 new_collection_name,
                 new_collection,
